@@ -11,10 +11,12 @@ function declarationKeyword(statement){
   return statement.binding.mutable ? type : `final ${type}`;
 }
 
-function renderDeclarationEquals(statement,ready){
-  if(!ready) return '=';
-  return h('button',{class:'declaration-equals tok tok-op-active tok-colored ready',
-    title:`Assign the resolved value to ${statement.binding.name}`,
+function renderDeclarationEquals(statement,ready,context,item){
+  const strictCandidate=typeof strictSequenceEnabled==='function'&&strictSequenceEnabled()
+    &&context&&context.isCurrent&&!item.checked&&!item.practiceInvalidExecution;
+  if(!ready&&!strictCandidate) return '=';
+  return h('button',{class:'declaration-equals tok tok-op-active tok-colored ready'+(strictCandidate?' strict-sequence-candidate':''),
+    title:`Assign the current value to ${statement.binding.name}`,
     'aria-label':`assign value to ${statement.binding.name}`,
     onclick:()=>handleTokenClick({type:'commit-assignment'})},'=');
 }
@@ -24,7 +26,7 @@ function renderDeclarationStatement(ctx){
   const runtime = statement.runtime;
   const expanded=statement.status==='complete'&&!!(statement._uiExpanded||statement._uiJustCompleted);
 
-  const card = h('section',{class:`program-statement declaration-statement ${statement.status}`,
+  const card = h('section',{class:`program-statement declaration-statement ${statement.status}${item.practiceInvalidExecution?' practice-paused':''}`,
     'data-statement-id':statement.id});
   if(!isActive&&!expanded){
     card.appendChild(renderProgramStatementSummary(statement,statementIndex,
@@ -44,19 +46,21 @@ function renderDeclarationStatement(ctx){
     statementId:statement.id,
     statementNumber:statementIndex+1,
     continuationStyle:true,
-    interactive:isActive && !runtime.checked,
+    interactive:isActive && !runtime.checked && !item.checked && !item.practiceInvalidExecution,
     revealCorrectness:runtime.checked&&state.mode!=='exam',
     isFullyResolved:()=>declarationInitializerResolved(statement),
-    renderEquals:ready=>renderDeclarationEquals(statement,ready),
+    renderEquals:(ready,context)=>renderDeclarationEquals(statement,ready,context,item),
     renderTrailingActions:()=>isActive
       ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)})
       : renderCollapseStatementAction(statement,statementIndex)
   }));
 
-  if(isActive){
+  if(isActive&&!item.checked){
     const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
     const ready = declarationInitializerResolved(statement);
-    if(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance){
+    if(state.mode==='practice'&&item.practiceInvalidExecution){
+      card.appendChild(renderContextHelp(strictPracticeInvalidMessage(item)));
+    } else if(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance){
       card.appendChild(renderContextHelp(unresolved
         ? 'Substitute the initialized value from program memory before evaluating this initializer.'
         : (ready ? `The initializer is resolved. Click = to assign it to ${statement.binding.name}.`

@@ -123,6 +123,17 @@ function dispatchProgramAction(item, action, services){
   return result;
 }
 
+// Optional strict-assessment hook. Statement plugins own the meaning of a
+// rejected command; the program core only routes the question so exam policy
+// never needs declaration/assignment-specific branches.
+function classifyRejectedProgramAction(item,action){
+  const program=ensureProgramEnvelope(item);
+  const statement=currentProgramStatement(item);
+  const plugin=statementPluginFor(statement);
+  if(!plugin||typeof plugin.classifyRejectedAction!=='function') return null;
+  return plugin.classifyRejectedAction({program,statement,item,action})||null;
+}
+
 function checkProgramItem(item, services){
   const program = ensureProgramEnvelope(item);
   const statement = currentProgramStatement(item);

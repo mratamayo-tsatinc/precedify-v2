@@ -14,6 +14,7 @@ const state = {
   items: [], // {originalTree, originalFlat, decls, correctFinalValue, canonicalTrace, workingFlat, history:[], trace:[], checked, itemScore, revealSolution}
   itemsByProfile: {}, // Stores all generated items per profile for persistence
   sessionSeed: null, // Seed used for reproducible item generation
+  practicePolicy: null, // immutable snapshot of practice settings captured when a session starts
   examPolicy: null, // immutable snapshot of exam settings captured when an attempt starts
   examTimerMinutes: null,
   examSubmitted: false,
@@ -29,10 +30,17 @@ const state = {
 //  - timerMinutes: duration for exam mode (set once at login)
 // ============================================================================
 const DEFAULT_APP_SETTINGS = Object.freeze({
-  schemaVersion: 2,
+  schemaVersion: 4,
+  // local-configurable | state-only. This deployment switch is intentionally
+  // read only: persisted browser data can never override it.
+  settingsPolicy: 'local-configurable',
   mode: 'practice',
   timerMinutes: 15,
+  practice: Object.freeze({
+    interactionMode: 'guided' // guided | strict-sequence
+  }),
   exam: Object.freeze({
+    interactionMode: 'guided', // guided | strict-sequence
     allowUndo: true,
     allowReviewFlags: true,
     showNeutralGuidance: false,
@@ -47,10 +55,20 @@ const DEFAULT_APP_SETTINGS = Object.freeze({
 function cloneDefaultAppSettings(){
   return {
     schemaVersion:DEFAULT_APP_SETTINGS.schemaVersion,
+    settingsPolicy:DEFAULT_APP_SETTINGS.settingsPolicy,
     mode:DEFAULT_APP_SETTINGS.mode,
     timerMinutes:DEFAULT_APP_SETTINGS.timerMinutes,
+    practice:Object.assign({},DEFAULT_APP_SETTINGS.practice),
     exam:Object.assign({},DEFAULT_APP_SETTINGS.exam)
   };
+}
+
+function settingsAreStateOnly(){
+  return DEFAULT_APP_SETTINGS.settingsPolicy==='state-only';
+}
+
+function snapshotPracticePolicy(settings){
+  return Object.assign({},DEFAULT_APP_SETTINGS.practice,(settings&&settings.practice)||{});
 }
 
 let appSettings = cloneDefaultAppSettings();
@@ -68,8 +86,24 @@ function activeExamPolicy(){
   return state.examPolicy || snapshotExamPolicy(appSettings);
 }
 
+function activePracticePolicy(){
+  return state.practicePolicy || snapshotPracticePolicy(appSettings);
+}
+
 function examAllowsUndo(){
   return state.mode!=='exam' || (!state.examSubmitted && activeExamPolicy().allowUndo);
+}
+
+function strictSequenceEnabled(){
+  if(state.mode==='practice') return activePracticePolicy().interactionMode==='strict-sequence';
+  return state.mode==='exam' && !state.examSubmitted
+    && activeExamPolicy().interactionMode==='strict-sequence';
+}
+
+// Compatibility name retained for optional modules authored against the
+// first exam-only version of this policy.
+function strictExamSequenceEnabled(){
+  return state.mode==='exam' && strictSequenceEnabled();
 }
 
 function examResultsVisible(){
@@ -81,6 +115,7 @@ function examResultsVisible(){
 
 function canUndoForCurrentMode(item){
   if(!item||item.checked||!examAllowsUndo()) return false;
+  if(state.mode==='practice'&&item.practiceInvalidExecution) return true;
   if(state.mode!=='exam') return canUndoProgram(item);
   const statement=currentProgramStatement(item);
   const plugin=statementPluginFor(statement);
@@ -134,6 +169,8 @@ function generateItemsForProfile(profileId) {
       lockedAt: null,
       examOmitted: false,
       examActionLog: [],
+      examSequenceFailure: null,
+      practiceInvalidExecution: null,
       _bindings: null // lazily built by var-final-state.js (ensureBindings)
     };
     buildGeneratedProgram(item, profile);
@@ -153,6 +190,7 @@ function startSession(){
   
   // Apply settings mode
   state.mode = appSettings.mode;
+  state.practicePolicy = state.mode==='practice' ? snapshotPracticePolicy(appSettings) : null;
   state.examPolicy = state.mode==='exam' ? snapshotExamPolicy(appSettings) : null;
   state.examTimerMinutes = state.mode==='exam' ? appSettings.timerMinutes : null;
   state.examSubmitted = false;
@@ -194,6 +232,7 @@ function itemFullyResolved(item){
 // "correct next" one) can be clicked — see the FLAT model comment above.
 function handleTokenClick(action){
   const item = currentItem();
+  if(!item || item.checked || state.examSubmitted || item.practiceInvalidExecution) return;
   const applyAction = ()=>{
     const statement=currentProgramStatement(item);
     const runtime=statement&&statement.kind==='legacy-expression'?item:(statement&&statement.runtime);
@@ -202,12 +241,25 @@ function handleTokenClick(action){
     if(result.applied){
       const producedStep=runtime&&runtime.trace&&runtime.trace.length>traceLength
         ? runtime.trace[runtime.trace.length-1] : null;
+      const event=result.event||null;
+      const scoredAction=!!((producedStep&&producedStep.action==='EVALUATE')
+        ||(event&&event.action==='ASSIGN'));
+      const actionWasCorrect=producedStep&&producedStep.action==='EVALUATE'
+        ? producedStep.wasCorrect : (event&&event.action==='ASSIGN'?event.wasCorrect:undefined);
       recordExamAction(item,action,{
         statementId:statement&&statement.id,
-        wasCorrect:producedStep&&producedStep.wasCorrect,
-        value:result.event&&result.event.value
+        wasCorrect:actionWasCorrect,
+        scoredAction,
+        creditEligible:actionWasCorrect!==false,
+        value:event&&event.value
       });
       render();
+    } else if(strictSequenceEnabled()){
+      const reason=strictSequenceInvalidAttemptReason(item,statement,runtime,action);
+      if(reason){
+        if(state.mode==='exam') terminateStrictExamItem(item,action,reason,statement);
+        else pauseStrictPracticeItem(item,action,reason,statement);
+      }
     }
     return !!result.applied;
   };
@@ -227,6 +279,124 @@ function handleTokenClick(action){
   if(typeof prepareLiveStepStage==='function'
     && prepareLiveStepStage(item,action,commitAction)) return;
   commitAction();
+}
+
+function examCurrentCorrectScoredChecks(item){
+  let correct=Array.isArray(item.trace)
+    ? item.trace.filter(step=>step.action==='EVALUATE'&&step.wasCorrect===true).length : 0;
+  if(item.program&&item.program.scoreAssignments){
+    item.program.statements.forEach(statement=>{
+      if(!['declaration','assignment'].includes(statement.kind)||!statement.runtime) return;
+      correct+=statement.runtime.trace.filter(step=>step.action==='EVALUATE'&&step.wasCorrect===true).length;
+      if(statement.runtime.checked&&statement.runtime.wasCorrectAssignment===true) correct++;
+    });
+  }
+  return correct;
+}
+
+function examCanonicalScoredCheckCount(item){
+  let total=1; // final derived-value check
+  const finalSteps=item&&item.canonicalTrace&&Array.isArray(item.canonicalTrace.steps)
+    ? item.canonicalTrace.steps : [];
+  total+=finalSteps.filter(step=>step.action==='EVALUATE').length;
+  if(item&&item.program&&item.program.scoreAssignments){
+    item.program.statements.forEach(statement=>{
+      if(!['declaration','assignment'].includes(statement.kind)||!statement.runtime) return;
+      const canonical=statement.runtime.canonicalTrace&&Array.isArray(statement.runtime.canonicalTrace.steps)
+        ? statement.runtime.canonicalTrace.steps : [];
+      total+=canonical.filter(step=>step.action==='EVALUATE').length+1;
+    });
+  }
+  return Math.max(1,total);
+}
+
+function strictExamFailurePoints(item){
+  const profile=PROFILES.find(candidate=>candidate.id===item.profileId)||currentProfile();
+  const maximum=profile?profile.pointsPerItem:0;
+  const failure=item.examSequenceFailure;
+  const correct=failure?failure.correctPrefixChecks:0;
+  const total=failure?failure.totalChecks:examCanonicalScoredCheckCount(item);
+  return {points:roundPoints(total>0?maximum*(correct/total):0),maxPoints:maximum};
+}
+
+function markStrictExamSequenceFailure(item,action,reason,terminal,detail){
+  if(!strictExamSequenceEnabled()||!item||item.examSequenceFailure) return false;
+  item.examSequenceFailure=Object.assign({
+    reason,terminal:!!terminal,timestamp:Date.now(),
+    attemptedAction:action&&action.type?action.type:String(action),
+    correctPrefixChecks:examCurrentCorrectScoredChecks(item),
+    totalChecks:examCanonicalScoredCheckCount(item)
+  },detail||{});
+  return true;
+}
+
+function strictSequenceInvalidAttemptReason(item,statement,runtime,action){
+  if(!item||!statement||!runtime||!action) return null;
+  if(action.type==='evaluate'){
+    const flat=runtime.workingFlat;
+    if(!flat) return null;
+    for(let i=0;i<flat.operators.length;i++){
+      const left=flat.operands[i],right=flat.operands[i+1];
+      if(left.id!==action.leftId||right.id!==action.rightId) continue;
+      if(!isFlatOperandReady(left)||!isFlatOperandReady(right)) return 'operands-unresolved';
+      if((flat.operators[i]==='/'||flat.operators[i]==='%')&&flatOperandValue(right)===0) return 'division-by-zero';
+      return null;
+    }
+    return null;
+  }
+  if(action.type==='apply-unary'){
+    const node=findFlatOperandById(runtime.workingFlat,action.id);
+    return node&&node.kind==='unary'&&!node.substituted?'unary-operand-unresolved':null;
+  }
+  return typeof classifyRejectedProgramAction==='function'
+    ? classifyRejectedProgramAction(item,action) : null;
+}
+
+function pauseStrictPracticeItem(item,action,reason,statement){
+  if(!item||item.practiceInvalidExecution) return false;
+  item.practiceInvalidExecution={
+    reason,
+    timestamp:Date.now(),
+    attemptedAction:action&&action.type?action.type:String(action),
+    statementId:statement&&statement.id,
+    recoverable:true
+  };
+  render();
+  return true;
+}
+
+function terminateStrictExamItem(item,action,reason,statement){
+  if(!markStrictExamSequenceFailure(item,action,reason,true,{statementId:statement&&statement.id})) return false;
+  if(item.program&&Array.isArray(item.program.statements)){
+    item.program.status='terminated';
+    item.program.statements.forEach((candidate,index)=>{
+      if(index===item.program.cursor) candidate.status='invalid';
+      else if(index>item.program.cursor) candidate.status='blocked';
+    });
+  }
+  const score=strictExamFailurePoints(item);
+  item.checked=true;
+  item.lockedAt=Date.now();
+  item.flagged=false;
+  item.showSolution=false;
+  item.playback=null;
+  item.studentFinal=null;
+  item.correctSteps=item.examSequenceFailure.correctPrefixChecks;
+  item.totalOpSteps=item.examSequenceFailure.totalChecks;
+  item.wasCorrectFinal=false;
+  item.points=score.points;
+  item.maxPoints=score.maxPoints;
+  item.itemScore=score.maxPoints>0?score.points/score.maxPoints:0;
+  item.programScoreFacts={
+    programCorrectChecks:item.examSequenceFailure.correctPrefixChecks,
+    programTotalChecks:item.examSequenceFailure.totalChecks,
+    expressionCorrectSteps:0,expressionTotalSteps:0,finalCorrect:false,
+    strictSequenceTerminated:true
+  };
+  recordExamAction(item,action,{statementId:statement&&statement.id,wasCorrect:false,
+    scoredAction:true,creditEligible:false,terminal:true,reason});
+  render();
+  return true;
 }
 
 function recordExamAction(item,action,detail){
@@ -286,15 +456,24 @@ function applyExpressionAction(item, action){
 
   if(action.type==='evaluate'){
     const unresolvedAny = collectUnresolvedFlat(item.workingFlat,[]).length>0;
-    if(unresolvedAny) return false; // gated: all variables/constants must resolve first
+    if(strictSequenceEnabled()){
+      const executable=collectReadyOperatorsFlat(item.workingFlat,[])
+        .some(candidate=>candidate.leftId===action.leftId&&candidate.rightId===action.rightId);
+      if(!executable) return false;
+    } else if(unresolvedAny) return false;
     const before = flatToString(item.workingFlat);
     const maxCands = getMaxPrecCandidatesFlat(item.workingFlat);
-    const wasCorrect = maxCands.some(c=>c.leftId===action.leftId && c.rightId===action.rightId);
+    // In strict mode a locally computable pair may be selected while another
+    // named operand elsewhere is still unresolved. Execute it so the chosen
+    // path can play out, but never award sequence credit: substitution was
+    // still the required next phase before any binary evaluation.
+    const wasCorrect = !unresolvedAny
+      && maxCands.some(c=>c.leftId===action.leftId && c.rightId===action.rightId);
     const evalResult = evaluateFlatAt(item.workingFlat, action.leftId, action.rightId);
     if(!evalResult.applied) return false;
     item.workingFlat = evalResult.newFlat;
     const after = flatToString(item.workingFlat);
-    item.trace.push({action:'EVALUATE', target:{operator:evalResult.op, operands:[evalResult.a, evalResult.b]}, result:evalResult.result, expressionBefore:before, expressionAfter:after, wasCorrect, resultNodeId:evalResult.resultId, leftId:action.leftId, rightId:action.rightId});
+    item.trace.push({action:'EVALUATE', target:{operator:evalResult.op, operands:[evalResult.a, evalResult.b]}, result:evalResult.result, expressionBefore:before, expressionAfter:after, wasCorrect, expectedOperators:maxCands.map(candidate=>candidate.op), resultNodeId:evalResult.resultId, leftId:action.leftId, rightId:action.rightId});
     item.history.push(deepCloneFlat(item.workingFlat));
     return true;
   }
@@ -304,6 +483,11 @@ function applyExpressionAction(item, action){
 function handleUndo(){
   const item = currentItem();
   if(!examAllowsUndo() || !item || item.checked) return;
+  if(state.mode==='practice'&&item.practiceInvalidExecution){
+    item.practiceInvalidExecution=null;
+    render();
+    return;
+  }
   if(state.mode==='exam'){
     const statement=currentProgramStatement(item);
     const plugin=statementPluginFor(statement);
@@ -328,6 +512,7 @@ function handleReset(){
   // Practice/Exam difference besides the one-check-per-item rule below.
   const item = currentItem();
   if(state.mode==='exam' || item.checked) return;
+  item.practiceInvalidExecution=null;
   const result = resetProgramAction(item, {resetExpressionAction});
   if(result.applied) render();
 }
@@ -339,6 +524,7 @@ function resetExpressionAction(item){
   item.workingFlat = deepCloneFlat(item.originalFlat);
   item.history = [deepCloneFlat(item.originalFlat)];
   item.trace = [];
+  item.practiceInvalidExecution = null;
   item._bindings = null;
   return changed;
 }
@@ -615,6 +801,7 @@ function handleRetrySameItem(){
   item.workingFlat = deepCloneFlat(item.originalFlat);
   item.history = [deepCloneFlat(item.originalFlat)];
   item.trace = [];
+  item.practiceInvalidExecution = null;
   item.checked = false;
   item.itemScore = null;
   item.points = null; item.maxPoints = null;

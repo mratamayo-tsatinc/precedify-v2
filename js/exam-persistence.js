@@ -41,7 +41,7 @@ function saveExamProgress(){
   if(state.screen !== 'session' && !(state.screen==='done'&&state.examSubmitted)) return;
   try{
     const record = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       email: state.userEmail,
       studentId: state.userStudentId,
       profileId: state.profileId,
@@ -142,6 +142,8 @@ function tryResumeExamSession(email){
       if(typeof item.flagged!=='boolean') item.flagged=false;
       if(typeof item.examOmitted!=='boolean') item.examOmitted=false;
       if(!Array.isArray(item.examActionLog)) item.examActionLog=[];
+      if(item.examSequenceFailure===undefined) item.examSequenceFailure=null;
+      if(item.practiceInvalidExecution===undefined) item.practiceInvalidExecution=null;
       if(item.lockedAt===undefined) item.lockedAt=item.checked ? (record.savedAt||null) : null;
       item._bindings = null;
       item._feedbackAnimated = false;

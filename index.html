@@ -67,6 +67,11 @@
       </button>
     </div>
     <div class="modal-body">
+      <div id="settingsPolicyNotice" class="settings-policy-notice" style="display:none;" role="status">
+        <i class="fa-solid fa-lock" aria-hidden="true"></i>
+        <span><b>Settings are controlled by this deployment.</b> Session options are read-only because <code>settingsPolicy</code> is set to <code>state-only</code> in <code>state.js</code>. Data-management actions remain available below.</span>
+      </div>
+      <fieldset id="settingsConfigFields" class="settings-config-fields">
       <div class="settings-section">
         <label class="settings-label">Activity Mode</label>
         <div class="mode-options">
@@ -79,6 +84,16 @@
             <span>Exam Mode (Timed)</span>
           </label>
         </div>
+      </div>
+
+      <div class="settings-section" id="practicePolicySection">
+        <label class="settings-label">Practice behavior</label>
+        <label class="settings-field-label" for="practiceInteractionMode">Evaluation interaction</label>
+        <select id="practiceInteractionMode" class="settings-select">
+          <option value="guided">Guided readiness — unavailable operations remain locked</option>
+          <option value="strict-sequence">Strict sequence — invalid actions pause until Undo</option>
+        </select>
+        <small class="input-hint">Strict Practice lets students test executable operator orders. An action that cannot execute pauses the item, explains the problem, and must be undone before continuing.</small>
       </div>
 
       <div class="settings-section" id="timerSection" style="display: none;">
@@ -97,6 +112,12 @@
 
         <div class="exam-policy-settings">
           <label class="settings-label">Exam behavior</label>
+          <label class="settings-field-label" for="examInteractionMode">Evaluation interaction</label>
+          <select id="examInteractionMode" class="settings-select">
+            <option value="guided">Guided readiness — unavailable operations remain locked</option>
+            <option value="strict-sequence">Strict sequence — all operation candidates are selectable</option>
+          </select>
+          <small class="input-hint">In strict sequence mode, executable choices continue even when their order is wrong. An operation that cannot yet be computed ends the item, preserving only earned prefix credit.</small>
           <label class="setting-toggle">
             <input type="checkbox" id="examAllowUndo">
             <span><b>Allow one-step Undo</b><small>Only within the current unfinished statement.</small></span>
@@ -121,6 +142,7 @@
           <p class="exam-policy-note"><i class="fa-solid fa-lock"></i> Checked items lock permanently. The correct-solution playback is always unavailable in Exam mode, and timeout always submits the saved attempt.</p>
         </div>
       </div>
+      </fieldset>
 
       <div class="settings-section settings-danger-zone">
         <label class="settings-label">Danger Zone</label>
@@ -152,7 +174,7 @@
     </div><!-- closes modal-body -->
     <div class="modal-footer">
       <button class="secondary-btn" onclick="closeSettingsModal()">Cancel</button>
-      <button class="primary-btn" onclick="saveSettings()">Save</button>
+      <button id="saveSettingsBtn" class="primary-btn" onclick="saveSettings()">Save</button>
     </div>
   </div><!-- closes modal-content -->
 </div><!-- closes settingsModal -->

@@ -40,6 +40,12 @@ function syncDeclarationOperandsFromMemory(statement, program){
 registerStatementPlugin({
   kind: 'declaration',
 
+  classifyRejectedAction(ctx){
+    if(ctx.action&&ctx.action.type==='commit-assignment'
+      &&!declarationInitializerResolved(ctx.statement)) return 'initializer-unresolved';
+    return null;
+  },
+
   applyAction(ctx){
     const {statement, program, action} = ctx;
     const runtime = statement.runtime;

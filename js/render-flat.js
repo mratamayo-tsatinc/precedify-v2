@@ -58,6 +58,24 @@ function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
     const nm = op.inner.kind==='literal' ? String(op.inner.value) : op.inner.name;
     const label = op.op==='!' ? ('!'+nm) : (op.form==='prefix' ? op.op+nm : nm+op.op);
     const namedKind = op.inner.kind==='constant' ? 'constant' : (op.inner.kind==='variable' ? 'variable' : null);
+    const strictSequence=typeof strictSequenceEnabled==='function'&&strictSequenceEnabled();
+    if(strictSequence){
+      const valueAttrs={class:'tok tok-var tok-colored'+(namedKind?' binding-identity':''),
+        style:namedKind?bindingIdentityStyle(nm,namedKind,activeColor):`color:${activeColor};`,
+        tabindex:'0',role:'button','aria-label':`substitute ${nm}`,'data-token-id':op.id,
+        'data-binding-name':namedKind?nm:null,
+        onclick:()=>handleTokenClick({type:'substitute',id:op.id}),
+        onkeydown:(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();handleTokenClick({type:'substitute',id:op.id});}}};
+      const operatorAttrs={class:'tok tok-op-active tok-colored strict-sequence-candidate',
+        style:`color:${activeColor};`,tabindex:'0',role:'button',
+        'aria-label':`attempt to apply ${op.op}`,
+        onclick:()=>handleTokenClick({type:'apply-unary',id:op.id}),
+        onkeydown:(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();handleTokenClick({type:'apply-unary',id:op.id});}}};
+      const valueNode=h('span',valueAttrs,nm);
+      const operatorNode=h('span',operatorAttrs,op.op);
+      const strictParts=(op.op==='!'||op.form==='prefix')?[operatorNode,valueNode]:[valueNode,operatorNode];
+      return h('span',{class:'unary-token-group'},...strictParts);
+    }
     return h('span',{class:'tok tok-var tok-colored'+(namedKind?' binding-identity':''),
       style:namedKind ? bindingIdentityStyle(nm,namedKind,activeColor) : `color:${activeColor};`,
       tabindex:'0', role:'button', 'aria-label':`substitute ${nm}`, 'data-token-id':op.id,
@@ -95,14 +113,16 @@ function renderInteractiveFlatExpr(flat, colorMap, activeColor, flashId, unresol
     if(closeAt.has(i)) parts.push(h('span',{class:'tok tok-op-muted'}, ')'));
     if(i<flat.operators.length){
       const L = flat.operands[i], R = flat.operands[i+1], opStr = flat.operators[i];
+      const strictSequence=typeof strictSequenceEnabled==='function'&&strictSequenceEnabled();
       const ready = !unresolvedAny && pairReady(L,R,opStr);
-      const opCls = 'tok '+(ready ? 'tok-op-active tok-colored' : 'tok-op-muted');
-      const opAttrs = {class:opCls, tabindex: ready ? '0' : '-1', role:'button', 'aria-label':`evaluate ${opStr}`,
+      const selectable=ready||strictSequence;
+      const opCls = 'tok '+(selectable ? 'tok-op-active tok-colored'+(strictSequence?' strict-sequence-candidate':'') : 'tok-op-muted');
+      const opAttrs = {class:opCls, tabindex: selectable ? '0' : '-1', role:'button', 'aria-label':`evaluate ${opStr}`,
         'data-op-left': L.id, 'data-op-right': R.id,
-        onclick: ready ? ()=>handleTokenClick({type:'evaluate', leftId:L.id, rightId:R.id}) : null,
-        onkeydown: ready ? (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleTokenClick({type:'evaluate', leftId:L.id, rightId:R.id}); } } : null
+        onclick: selectable ? ()=>handleTokenClick({type:'evaluate', leftId:L.id, rightId:R.id}) : null,
+        onkeydown: selectable ? (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleTokenClick({type:'evaluate', leftId:L.id, rightId:R.id}); } } : null
       };
-      if(ready) opAttrs.style = `color:${activeColor};`;
+      if(selectable) opAttrs.style = `color:${activeColor};`;
       parts.push(' ', h('span',opAttrs, opStr), ' ');
     }
   }

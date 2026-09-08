@@ -4,26 +4,31 @@
 // appSettings.mode / appSettings.timerMinutes are deliberately persisted
 // globally under ONE shared key, not keyed per student — this models a
 // device/browser-level "what mode is this station in" setting, the same
-// way a physical exam-mode switch would work. It is the SINGLE SOURCE OF
-// TRUTH for whether the app should treat itself as mid-exam: both a page
-// refresh (main.js) and a logout->login (login.js) resume exam progress
-// if and only if this persisted mode is currently 'exam' — no other
-// signal (in-memory appSettings state, whatever a settings dialog happened
-// to show mid-session, etc.) factors into that decision. That makes resume
-// fully intentional and reproducible from disk, not an assumption derived
-// from whatever state happened to survive in memory.
+// way a physical exam-mode switch would work. It is the source of truth in
+// local-configurable deployments. In state-only deployments, state.js is the
+// source and this record is ignored; student exam records remain separate.
 // ============================================================================
 
 const APP_SETTINGS_KEY = 'precedifyAppSettings';
 
 function normalizeAppSettings(value){
   const normalized=cloneDefaultAppSettings();
+  // The deployment owner controls this switch in state.js. Browser-saved
+  // settings are deliberately ignored while the application is state-only.
+  if(settingsAreStateOnly()) return normalized;
   if(!value||typeof value!=='object') return normalized;
   if(value.mode==='practice'||value.mode==='exam') normalized.mode=value.mode;
   if(typeof value.timerMinutes==='number'&&value.timerMinutes>=1&&value.timerMinutes<=999){
     normalized.timerMinutes=Math.round(value.timerMinutes);
   }
+  const practice=value.practice&&typeof value.practice==='object'?value.practice:{};
+  if(practice.interactionMode==='guided'||practice.interactionMode==='strict-sequence'){
+    normalized.practice.interactionMode=practice.interactionMode;
+  }
   const exam=value.exam&&typeof value.exam==='object'?value.exam:{};
+  if(exam.interactionMode==='guided'||exam.interactionMode==='strict-sequence'){
+    normalized.exam.interactionMode=exam.interactionMode;
+  }
   ['allowUndo','allowReviewFlags','showNeutralGuidance','showScoresDuringExam'].forEach(key=>{
     if(typeof exam[key]==='boolean') normalized.exam[key]=exam[key];
   });
@@ -48,8 +53,11 @@ function loadPersistedAppSettings(){
 function savePersistedAppSettings(){
   try{
     appSettings=normalizeAppSettings(appSettings);
+    if(settingsAreStateOnly()) return false;
     localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings));
+    return true;
   }catch(e){ /* storage full/unavailable — silently skip */ }
+  return false;
 }
 
 // Manual, explicit "wipe every student's exam progress" action. This is the

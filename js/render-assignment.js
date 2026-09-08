@@ -1,18 +1,20 @@
 // Assignment presentation is a thin adapter over the shared legacy expression
 // timeline. Only the target/operator label and statement controls are unique.
-function renderAssignmentOperator(statement,ready){
-  if(!ready) return isCompoundAssignment(statement)
+function renderAssignmentOperator(statement,ready,context,item){
+  const strictCandidate=typeof strictSequenceEnabled==='function'&&strictSequenceEnabled()
+    &&context&&context.isCurrent&&item&&!item.checked&&!item.practiceInvalidExecution;
+  if(!ready&&!strictCandidate) return isCompoundAssignment(statement)
     ? h('span',{class:'tok tok-op-muted assignment-operator-static',
         'data-assignment-op-id':statement.id},statement.operator)
     : statement.operator;
-  return h('button',{class:'declaration-equals tok tok-op-active tok-colored assignment-operator'+(statement.operator.length>1?' compound':'')+' ready',
+  return h('button',{class:'declaration-equals tok tok-op-active tok-colored assignment-operator'+(statement.operator.length>1?' compound':'')+' ready'+(strictCandidate?' strict-sequence-candidate':''),
     'data-assignment-op-id':statement.id,
     title:`Apply ${statement.operator} to ${statement.target}`,
     'aria-label':`apply ${statement.operator} to ${statement.target}`,
     onclick:()=>handleTokenClick({type:'commit-assignment'})},statement.operator);
 }
 
-function renderCompoundAssignmentPrefix(statement,context,isActive){
+function renderCompoundAssignmentPrefix(statement,context,isActive,item){
   const runtime=statement.runtime;
   const tokenId=assignmentTargetTokenId(statement);
   const readIndex=runtime.trace.findIndex(step=>step.action==='READ_TARGET');
@@ -23,7 +25,7 @@ function renderCompoundAssignmentPrefix(statement,context,isActive){
       kind:'variable',color:stepVisualColor(runtime.trace[readIndex],readIndex),isFlash:context.flashId===tokenId});
     targetNode.classList.add('compound-target-card');
   } else {
-    const interactive=isActive&&!runtime.checked&&context.isCurrent;
+    const interactive=isActive&&!runtime.checked&&!item.checked&&context.isCurrent;
     const pendingRead=context.pendingStep&&context.pendingStep.action==='READ_TARGET';
     const highlighted=interactive||pendingRead;
     const attrs={class:'tok tok-var binding-identity '+(highlighted?'tok-colored':'tok-static')+(interactive?' compound-target-ready':''),
@@ -38,7 +40,7 @@ function renderCompoundAssignmentPrefix(statement,context,isActive){
     targetNode=h('span',attrs,statement.target);
   }
   const ready=isActive&&!runtime.checked&&context.isCurrent&&assignmentReadyToApply(statement);
-  return h('span',{class:'compound-assignment-prefix'},targetNode,' ',renderAssignmentOperator(statement,ready),' ');
+  return h('span',{class:'compound-assignment-prefix'},targetNode,' ',renderAssignmentOperator(statement,ready,context,item),' ');
 }
 
 const COMPOUND_MERGE_DURATION_MS=2200;
@@ -90,7 +92,7 @@ function renderAssignmentStatement(ctx){
   const {container,item,program,statement,statementIndex,isActive}=ctx;
   const runtime=statement.runtime;
   const expanded=statement.status==='complete'&&!!(statement._uiExpanded||statement._uiJustCompleted);
-  const card=h('section',{class:`program-statement assignment-statement ${statement.status}`,'data-statement-id':statement.id});
+  const card=h('section',{class:`program-statement assignment-statement ${statement.status}${item.practiceInvalidExecution?' practice-paused':''}`,'data-statement-id':statement.id});
   if(!isActive&&!expanded){
     card.appendChild(renderProgramStatementSummary(statement,statementIndex,
       programStatementSource(statement,item)));
@@ -102,16 +104,16 @@ function renderAssignmentStatement(ctx){
   const compound=isCompoundAssignment(statement);
   card.appendChild(renderExpressionEvaluationPanel({runtime,labelText,labelCh:labelText.length+1,
     title:null,panelClass:'assignment-eval-panel program-expression-panel',
-    statementId:statement.id,interactive:isActive&&!runtime.checked,revealCorrectness:runtime.checked&&state.mode!=='exam',
+    statementId:statement.id,interactive:isActive&&!runtime.checked&&!item.checked&&!item.practiceInvalidExecution,revealCorrectness:runtime.checked&&state.mode!=='exam',
     statementNumber:statementIndex+1,continuationStyle:true,
     isFullyResolved:()=>compound?assignmentReadyToApply(statement):assignmentRhsResolved(statement),
-    renderEquals:ready=>renderAssignmentOperator(statement,ready),
-    renderPrefix:compound?(context=>renderCompoundAssignmentPrefix(statement,context,isActive)):null,
+    renderEquals:(ready,context)=>renderAssignmentOperator(statement,ready,context,item),
+    renderPrefix:compound?(context=>renderCompoundAssignmentPrefix(statement,context,isActive,item)):null,
     renderAfterRows:compound?(timeline=>appendCompoundAssignmentResult(timeline,statement)):null,
     renderTrailingActions:()=>isActive
       ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)})
       : renderCollapseStatementAction(statement,statementIndex)}));
-  if(isActive){
+  if(isActive&&!item.checked){
     const unresolved=collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
     const ready=assignmentRhsResolved(statement);
     let guidance;
@@ -119,7 +121,9 @@ function renderAssignmentStatement(ctx){
     else if(unresolved) guidance='Substitute initialized values from program memory before evaluating the assignment value.';
     else if(!ready) guidance='Evaluate the highlighted operator.';
     else guidance=`Both values are ready. Click ${statement.operator} to update ${statement.target}.`;
-    if(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance) card.appendChild(renderContextHelp(guidance));
+    if(state.mode==='practice'&&item.practiceInvalidExecution){
+      card.appendChild(renderContextHelp(strictPracticeInvalidMessage(item)));
+    } else if(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance) card.appendChild(renderContextHelp(guidance));
     const canReset=state.mode==='practice'&&(program.cursor>0||runtime.trace.length>0||runtime.targetRevealed);
     const resetControl=renderItemResetControl(canReset);
     if(resetControl) card.appendChild(resetControl);

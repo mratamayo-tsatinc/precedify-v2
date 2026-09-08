@@ -64,6 +64,19 @@ function renderInlineEvaluationActions(options){
   return actions.length ? h('span',{class:'inline-eval-actions'},...actions) : null;
 }
 
+function strictPracticeInvalidMessage(item){
+  if(!item||!item.practiceInvalidExecution) return null;
+  const labels={
+    'operands-unresolved':'This operation cannot execute because one or both operand values are still unavailable.',
+    'unary-operand-unresolved':'This unary operation cannot execute until its variable value is available.',
+    'initializer-unresolved':'The declaration cannot assign a value until its initializer has been fully derived.',
+    'assignment-value-unresolved':'The assignment cannot execute until its right-side expression has been fully derived.',
+    'assignment-target-unread':'The compound assignment cannot execute until the variable’s current value is available.',
+    'division-by-zero':'This operation cannot execute because division or remainder by zero is undefined.'
+  };
+  return `${labels[item.practiceInvalidExecution.reason]||'This action cannot execute in the current program state.'} Use Undo to return to the executable state.`;
+}
+
 function renderItemResetControl(show){
   if(!show) return null;
   return h('div',{class:'item-reset-control'},
@@ -122,7 +135,9 @@ function renderProgramWorkspaceShell(container,item,program){
     'aria-valuemin':'1','aria-valuemax':String(program.statements.length),
     'aria-valuenow':String(Math.min(program.cursor+1,program.statements.length))});
   program.statements.forEach((statement,index)=>{
-    const status=statement.status==='complete'?'complete':(index===program.cursor?'current':'waiting');
+    const status=statement.status==='complete'?'complete'
+      :(statement.status==='invalid'?'invalid':(statement.status==='blocked'?'blocked'
+        :(index===program.cursor?'current':'waiting')));
     progress.appendChild(h('span',{class:`program-progress-dot ${status}`,
       title:`Statement ${index+1}: ${status}`,'aria-hidden':'true'}));
   });
@@ -143,12 +158,14 @@ function toggleProgramStatementDetails(statement){
 
 function renderProgramStatementSummary(statement,statementIndex,source){
   const complete=statement.status==='complete';
+  const blocked=statement.status==='blocked';
   const timeline=h('div',{class:'timeline program-summary-timeline'});
-  const row=h('div',{class:`tl-row program-summary-row ${complete?'done':'waiting'}`});
+  const row=h('div',{class:`tl-row program-summary-row ${complete?'done':(blocked?'blocked':'waiting')}`});
   row.appendChild(h('div',{class:'tl-dot statement-source-dot',
-    title:complete?'Completed statement':'Waiting statement'},String(statementIndex+1)));
-  const statusIcon=h('i',{class:`fa-solid ${complete?'fa-circle-check':'fa-lock'} program-summary-status`,
-    title:complete?'Completed':'Waiting','aria-label':complete?'Completed statement':'Waiting statement'});
+    title:complete?'Completed statement':(blocked?'Not executed':'Waiting statement')},String(statementIndex+1)));
+  const statusIcon=h('i',{class:`fa-solid ${complete?'fa-circle-check':(blocked?'fa-ban':'fa-lock')} program-summary-status`,
+    title:complete?'Completed':(blocked?'Not executed after invalid action':'Waiting'),
+    'aria-label':complete?'Completed statement':(blocked?'Statement not executed':'Waiting statement')});
   const action=complete?h('button',{class:'program-summary-toggle',type:'button',
     title:'Show evaluation steps','aria-label':`Show evaluation steps for statement ${statementIndex+1}`,
     onclick:()=>toggleProgramStatementDetails(statement)},
@@ -270,7 +287,7 @@ function renderSession(container){
     statementId:embeddedProgram?'expression':null,
     statementNumber:embeddedProgram?item.program.cursor+1:null,
     continuationStyle:true,
-    interactive:true,
+    interactive:!item.checked&&!item.practiceInvalidExecution,
     revealCorrectness:item.checked&&state.mode!=='exam',
     isFullyResolved:()=>itemFullyResolved(item),
     renderTrailingActions:()=>renderInlineEvaluationActions({
@@ -286,11 +303,15 @@ function renderSession(container){
 
   if(!itemFullyResolved(item) && !item.checked
     &&(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance)){
+    if(state.mode==='practice'&&item.practiceInvalidExecution){
+      evaluationHost.appendChild(renderContextHelp(strictPracticeInvalidMessage(item)));
+    } else {
     const unresolvedCount = collectUnresolvedFlat(item.workingFlat,[]).length;
     if(unresolvedCount>0){
       evaluationHost.appendChild(renderContextHelp(`Resolve ${unresolvedCount} more highlighted token${unresolvedCount>1?'s':''} (variable, constant, or unary) before operators become active.`));
     } else {
       evaluationHost.appendChild(renderContextHelp('Tap any highlighted operator to evaluate it — you choose the order. Wrong order is allowed; you\'ll see how it plays out.'));
+    }
     }
   }
 
@@ -327,13 +348,18 @@ function renderSession(container){
     item._feedbackAnimated = true;
     const fb = h('div',{class:'feedback '+(correct?'correct':'incorrect')+fbEnterCls});
     fb.appendChild(h('div',{class:'feedback-head'}, h('i',{class:'fa-solid '+(correct?'fa-circle-check':'fa-circle-xmark')}), correct ? ' Correct' : ' Incorrect'));
+    const terminalSequenceFailure=item.examSequenceFailure&&item.examSequenceFailure.terminal;
     fb.appendChild(h('div',{class:'feedback-body'},
-      correct
-        ? h('span',{}, 'Your derived result matches the independently calculated answer: ', h('span',{class:'num'}, String(item.correctFinalValue)), '.')
-        : h('span',{}, 'Your derived result was ', h('span',{class:'num'}, String(item.studentFinal)), '. The correct result is ', h('span',{class:'num'}, String(item.correctFinalValue)), '.')
+      terminalSequenceFailure
+        ? h('span',{},'This item ended when an operation was selected before its required value was available. Credit was retained only for the correct sequence completed before that attempt.')
+        : (correct
+          ? h('span',{}, 'Your derived result matches the independently calculated answer: ', h('span',{class:'num'}, String(item.correctFinalValue)), '.')
+          : h('span',{}, 'Your derived result was ', h('span',{class:'num'}, String(item.studentFinal)), '. The correct result is ', h('span',{class:'num'}, String(item.correctFinalValue)), '.'))
     ));
     fb.appendChild(h('div',{class:'feedback-stats'},
-      h('div',{class:'stat'}, h('div',{class:'sv'}, `${item.correctSteps}/${item.totalOpSteps}`), h('div',{class:'sl'},'steps in correct order')),
+      item.examSequenceFailure
+        ? h('div',{class:'stat'},h('div',{class:'sv'},`${item.examSequenceFailure.correctPrefixChecks}/${item.examSequenceFailure.totalChecks}`),h('div',{class:'sl'},'credited sequence checks'))
+        : h('div',{class:'stat'}, h('div',{class:'sv'}, `${item.correctSteps}/${item.totalOpSteps}`), h('div',{class:'sl'},'steps in correct order')),
       item.programScoreFacts && item.programScoreFacts.programTotalChecks>0
         ? h('div',{class:'stat'},
             h('div',{class:'sv'}, `${item.programScoreFacts.programCorrectChecks}/${item.programScoreFacts.programTotalChecks}`),
@@ -499,13 +525,13 @@ function renderExpressionEvaluationPanel(options){
   const labelCh = options.labelCh == null ? labelText.length+1 : options.labelCh;
   const resolved = ()=>!!options.isFullyResolved(runtime);
   const canInteract = options.interactive !== false;
-  const equalsNode = ready=>typeof options.renderEquals==='function'
-    ? options.renderEquals(ready) : '=';
+  const equalsNode = (ready,context)=>typeof options.renderEquals==='function'
+    ? options.renderEquals(ready,context) : '=';
   const prefixNodes = context=>typeof options.renderPrefix==='function'
     ? options.renderPrefix(context)
     : [renderAssignLabel(context.showLabel,labelText,labelCh),
       h('span',{class:context.isSource?'source-assignment-equals':'continuation-equals',
-        title:context.isSource?'Assignment operator':'Equivalent evaluation step'},equalsNode(context.ready)),' '];
+        title:context.isSource?'Assignment operator':'Equivalent evaluation step'},equalsNode(context.ready,context)),' '];
   const terminator = context=>options.continuationStyle
     ? (context.isSource?';':'') : ';';
   const trailingActions = context=>typeof options.renderTrailingActions==='function'

@@ -152,15 +152,19 @@ function openSettingsModal() {
   document.getElementById('settingsModal').style.display = 'flex';
   document.getElementById('settingsOverlay').style.display = 'block';
 
-  // appSettings is the persisted, global source of truth (see
-  // settings-persistence.js) — re-read it here in case it changed via
-  // another tab/window since this modal was last opened.
+  // Re-read browser settings in local-configurable deployments. The loader
+  // returns state.js defaults instead when policy is state-only.
   loadPersistedAppSettings();
 
   // Set current settings in the modal
   document.querySelector(`input[name="mode"][value="${appSettings.mode}"]`).checked = true;
   document.getElementById('timerInput').value = appSettings.timerMinutes;
   const exam=appSettings.exam;
+  const practice=appSettings.practice;
+  const practiceInteractionMode=document.getElementById('practiceInteractionMode');
+  if(practiceInteractionMode) practiceInteractionMode.value=practice.interactionMode;
+  const interactionMode=document.getElementById('examInteractionMode');
+  if(interactionMode) interactionMode.value=exam.interactionMode;
   const setChecked=(id,value)=>{const el=document.getElementById(id);if(el)el.checked=!!value;};
   setChecked('examAllowUndo',exam.allowUndo);
   setChecked('examAllowReviewFlags',exam.allowReviewFlags);
@@ -171,10 +175,24 @@ function openSettingsModal() {
   
   // Show/hide timer section based on mode
   const timerSection = document.getElementById('timerSection');
+  const practiceSection=document.getElementById('practicePolicySection');
   if (appSettings.mode === 'exam') {
     timerSection.style.display = 'block';
+    if(practiceSection) practiceSection.style.display='none';
   } else {
     timerSection.style.display = 'none';
+    if(practiceSection) practiceSection.style.display='block';
+  }
+
+  const stateOnly=typeof settingsAreStateOnly==='function'&&settingsAreStateOnly();
+  const fields=document.getElementById('settingsConfigFields');
+  const notice=document.getElementById('settingsPolicyNotice');
+  const saveButton=document.getElementById('saveSettingsBtn');
+  if(fields) fields.disabled=stateOnly;
+  if(notice) notice.style.display=stateOnly?'flex':'none';
+  if(saveButton){
+    saveButton.disabled=stateOnly;
+    saveButton.textContent=stateOnly?'Locked':'Save';
   }
 
   document.querySelectorAll('.danger-result').forEach(el=>{el.style.display='none';});
@@ -188,11 +206,14 @@ function closeSettingsModal() {
 function handleModeChange() {
   const selectedMode = document.querySelector('input[name="mode"]:checked').value;
   const timerSection = document.getElementById('timerSection');
+  const practiceSection=document.getElementById('practicePolicySection');
   
   if (selectedMode === 'exam') {
     timerSection.style.display = 'block';
+    if(practiceSection) practiceSection.style.display='none';
   } else {
     timerSection.style.display = 'none';
+    if(practiceSection) practiceSection.style.display='block';
   }
 }
 
@@ -218,6 +239,7 @@ function validateTimerInput(input) {
 }
 
 function saveSettings() {
+  if(typeof settingsAreStateOnly==='function'&&settingsAreStateOnly()) return;
   const selectedMode = document.querySelector('input[name="mode"]:checked').value;
   const timerInput = document.getElementById('timerInput');
   const timerValue = parseInt(timerInput.value, 10);
@@ -232,8 +254,14 @@ function saveSettings() {
   }
   
   appSettings.mode = selectedMode;
+  appSettings.practice={
+    interactionMode:(document.getElementById('practiceInteractionMode')||{}).value==='strict-sequence'
+      ?'strict-sequence':'guided'
+  };
   const checked=id=>{const el=document.getElementById(id);return !!(el&&el.checked);};
   appSettings.exam={
+    interactionMode:(document.getElementById('examInteractionMode')||{}).value==='strict-sequence'
+      ?'strict-sequence':'guided',
     allowUndo:checked('examAllowUndo'),
     allowReviewFlags:checked('examAllowReviewFlags'),
     showNeutralGuidance:checked('examShowNeutralGuidance'),

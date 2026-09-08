@@ -61,6 +61,15 @@ function applyAssignmentOperator(operator,currentValue,rhsValue){
 registerStatementPlugin({
   kind:'assignment',
 
+  classifyRejectedAction(ctx){
+    if(!ctx.action||ctx.action.type!=='commit-assignment') return null;
+    if(!assignmentRhsResolved(ctx.statement)) return 'assignment-value-unresolved';
+    if(isCompoundAssignment(ctx.statement)&&!assignmentTargetRevealed(ctx.statement)){
+      return 'assignment-target-unread';
+    }
+    return null;
+  },
+
   applyAction(ctx){
     const {statement,program,action,item} = ctx;
     const runtime = statement.runtime;
