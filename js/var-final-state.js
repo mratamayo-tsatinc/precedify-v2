@@ -149,10 +149,11 @@ function ensureBindings(item){
 // visibly disagree with the identically-colored value already shown in the
 // Evaluation timeline above it.
 function originColorForNode(trace, nodeId){
+  let color=null;
   for(let i=0;i<trace.length;i++){
-    if(trace[i].resultNodeId===nodeId) return stepColor(i);
+    if(trace[i].resultNodeId===nodeId) color=stepVisualColor(trace[i],i);
   }
-  return null;
+  return color;
 }
 
 // Resolves ONE binding's current on-screen state purely from live
@@ -179,8 +180,11 @@ function resolveBindingLive(binding, item){
     const originStatement = item.program.statements.find(s=>s.id===originStatementId) || statement;
     const trace = originStatement && originStatement.runtime ? originStatement.runtime.trace : [];
     const lastIdx = trace.length-1;
+    const completionColor = originStatement && originStatement.runtime && originStatement.runtime.checked
+      ? stepVisualColor({action:'APPLY_ASSIGNMENT'},trace.length)
+      : (lastIdx>=0 ? stepVisualColor(trace[lastIdx],lastIdx) : stepColor(0));
     return {hasValue:true, displayValue:memory.value, committed:true,originStatementId,
-      flashColor:lastIdx>=0 ? stepColor(lastIdx) : stepColor(0)};
+      flashColor:completionColor};
   }
   if(binding.trigger==='static'){
     return {hasValue:true, displayValue: binding.declaredValue, committed:true, flashColor:null};
@@ -208,7 +212,7 @@ function resolveBindingLive(binding, item){
     // earlier step, so its own index IS already the origin (first-touch of
     // one is itself).
     const lastIdx = item.trace.length-1;
-    color = lastIdx>=0 ? stepColor(lastIdx) : null;
+    color = lastIdx>=0 ? stepVisualColor(item.trace[lastIdx],lastIdx) : null;
   } else {
     // Postfix-mutated variable: its mutating UNARY step shares a
     // resultNodeId with the earlier SUBSTITUTE step that revealed it, so

@@ -20,7 +20,7 @@ function renderCompoundAssignmentPrefix(statement,context,isActive){
   let targetNode;
   if(revealedForRow){
     targetNode=renderValueCard({id:tokenId,name:statement.target,value:runtime.targetReadValue,
-      kind:'variable',color:stepColor(readIndex),isFlash:context.flashId===tokenId});
+      kind:'variable',color:stepVisualColor(runtime.trace[readIndex],readIndex),isFlash:context.flashId===tokenId});
     targetNode.classList.add('compound-target-card');
   } else {
     const interactive=isActive&&!runtime.checked&&context.isCurrent;
@@ -64,7 +64,7 @@ function compoundArithmeticOperator(operator){
 function appendCompoundAssignmentResult(timeline,statement){
   const runtime=statement.runtime;
   if(!runtime.checked || !isCompoundAssignment(statement)) return;
-  const color=stepColor(runtime.trace.length);
+  const color=stepVisualColor({action:'APPLY_ASSIGNMENT'},runtime.trace.length);
   const animate=typeof flyAnimEnabled==='boolean'&&flyAnimEnabled&&runtime.assignmentMergePending;
   if(!animate&&runtime.assignmentMergePending) runtime.assignmentMergePending=false;
   const source=h('span',{class:'compound-merge-source'},

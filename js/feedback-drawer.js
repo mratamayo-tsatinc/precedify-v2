@@ -26,6 +26,9 @@
 //     Colors the small dot on the docked tab green/red so a student can see
 //     at a glance whether their last check was correct even with the
 //     drawer closed. Pass a boolean; pass null/undefined to hide the dot.
+//   syncFeedbackDrawerForItem(item)
+//     Clears, closes and hides the drawer whenever the current item is absent
+//     or unchecked. Checked-item content remains owned by render-session.js.
 //
 // Every function is defensive (matches console-drawer.js/moment-feedback.js's
 // try/catch convention): a missing DOM node or bad argument degrades to a
@@ -100,7 +103,11 @@
         overlay.setAttribute('aria-hidden', 'true');
         if(wasOpen){
           const onEnd = () => {
-            try{ overlay.style.display = 'none'; }catch(e){ /* no-op */ }
+            try{
+              // The drawer may have been reopened before this close animation
+              // finished (for example during fast item navigation).
+              if(!panel.classList.contains('open')) overlay.style.display = 'none';
+            }catch(e){ /* no-op */ }
             panel.removeEventListener('transitionend', onEnd);
           };
           panel.addEventListener('transitionend', onEnd);
@@ -201,6 +208,20 @@
     }catch(e){ /* no-op */ }
   }
 
+  // Keeps this persistent, app-level drawer synchronized with the activity
+  // currently rendered in #app. Some program items intentionally do not call
+  // renderSession() until their declaration/assignment prelude is complete,
+  // so cleanup cannot live only inside that expression renderer.
+  function syncFeedbackDrawerForItem(item){
+    try{
+      if(item && item.checked) return;
+      clearFeedbackDrawerContent();
+      setFeedbackDrawerStatus(null);
+      closeFeedbackDrawer();
+      hideFeedbackDrawerTab();
+    }catch(e){ /* drawer state must never interrupt item navigation */ }
+  }
+
   // Escape closes whichever of the two drawers is currently open, mirroring
   // console-drawer.js's own Escape handling. Self-contained listener —
   // doesn't assume or touch console-drawer.js's own listener.
@@ -218,4 +239,5 @@
   root.showFeedbackDrawerTab = showFeedbackDrawerTab;
   root.hideFeedbackDrawerTab = hideFeedbackDrawerTab;
   root.setFeedbackDrawerStatus = setFeedbackDrawerStatus;
+  root.syncFeedbackDrawerForItem = syncFeedbackDrawerForItem;
 })();

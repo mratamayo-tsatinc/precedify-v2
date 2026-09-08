@@ -8,6 +8,7 @@ function render(){
   if(state.screen === 'login'){
     loginOverlay.style.display = 'flex';
     mainContent.style.display = 'none';
+    if(typeof syncFeedbackDrawerForItem === 'function') syncFeedbackDrawerForItem(null);
     return;
   } else {
     loginOverlay.style.display = 'none';
@@ -28,6 +29,14 @@ function render(){
   const container = document.getElementById('app');
   container.innerHTML = '';
   renderProgramItem(container, currentItem());
+
+  // The feedback drawer lives outside #app and survives its rebuild. Sync it
+  // at this global boundary so unchecked declaration/assignment items (which
+  // do not render the final expression yet) cannot inherit another item's tab
+  // or feedback content.
+  if(typeof syncFeedbackDrawerForItem === 'function'){
+    syncFeedbackDrawerForItem(currentItem());
+  }
 
   // Follow only genuinely new live-work rows. This runs before the memory
   // panel measures animation coordinates, so an enabled value flight never

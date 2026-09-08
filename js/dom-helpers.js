@@ -87,19 +87,25 @@ function renderValueCard(opts){
 }
 
 // ---------------------------------------------------------------------------
-// Result-connection helpers: every evaluation/substitution step is tagged
-// with a color by its POSITION in the trace (not by action type — every
-// EVALUATE step used to render the same fixed orange, so once an expression
-// had more than one operator there was no way to tell which specific step a
-// value came from). The operator (or, for a substitution, the variable/
-// constant name) that's about to fire is colored just before it fires, and
-// the value it produces keeps that exact color in every later render —
-// including once that value is itself consumed as an operand by a later
-// step. Colors are applied to text only (no background/box), so a value's
-// color is a permanent, at-a-glance record of which step created it.
+// Result-connection helpers. Variable/constant retrieval keeps the binding's
+// stable identity color; operations receive a color by their trace position.
+// The same resolved color is shared by the timeline dot, connector and result
+// accent so one visible step always reads as one operation.
 // ---------------------------------------------------------------------------
 const STEP_PALETTE = ['#ffa35c','#6fb7ff','#c39bff','#ffd166','#5ce1c9','#ff8fc7','#9ad068','#7aa2ff'];
 function stepColor(index){ return STEP_PALETTE[((index%STEP_PALETTE.length)+STEP_PALETTE.length)%STEP_PALETTE.length]; }
+// One semantic color decision for every rendered step. Retrieving an existing
+// named value preserves that binding's identity; operations that derive or
+// mutate a value receive the generated color for their step position.
+function stepVisualColor(step,index){
+  if(step && step.action==='READ_TARGET'){
+    return bindingIdentityColor(step.target,'variable');
+  }
+  if(step && step.action==='SUBSTITUTE' && step.targetKind!=='literal'){
+    return bindingIdentityColor(step.target,step.targetKind==='constant'?'constant':'variable');
+  }
+  return stepColor(index);
+}
 function hexToRgba(hex, alpha){
   const c = hex.replace('#','');
   const r = parseInt(c.substring(0,2),16), g = parseInt(c.substring(2,4),16), b = parseInt(c.substring(4,6),16);
@@ -108,26 +114,19 @@ function hexToRgba(hex, alpha){
 // Persistent id -> color map: for each of the first `count` steps in
 // `steps`, the node that step PRODUCED (resultNodeId — a new literal's id
 // for EVALUATE, or the same var/const id it always had for SUBSTITUTE) is
-// tagged with that step's provenance color. Derived literals keep it in later
-// renders; named variable/constant cards keep their separate binding color and
-// retain this step color only as an arrival/connector accent.
+// tagged with that step's semantic color. Derived literals keep it in later
+// renders, while named variable/constant retrieval stays binding-colored.
 function buildColorMap(steps, count){
   const map = new Map();
   const n = count==null ? steps.length : count;
   for(let i=0;i<n;i++){
-    const id = steps[i].resultNodeId;
-    // First-touch wins. A unary token is the one case where two DISTINCT
-    // trace steps share the same resultNodeId: SUBSTITUTE reveals the
-    // variable's value into its card, then a later UNARY step applies the
-    // operator to that same node. An unconditional overwrite here would
-    // repaint the value with the later step's color on every row rendered
-    // after that second step fires, even though the card itself (already
-    // drawn on an earlier row) keeps the first step's color — producing a
-    // visible mismatch between a token's source card and its resolved
-    // value. Setting only when the id is unseen preserves the color of
-    // whichever step actually originated the value, matching the "a value
-    // keeps the color of the step that created it" guarantee everywhere.
-    if(!map.has(id)) map.set(id, stepColor(i));
+    const step = steps[i];
+    const id = step.resultNodeId;
+    const color = stepVisualColor(step,i);
+    // SUBSTITUTE and UNARY intentionally share a node id. The first row is a
+    // binding-colored retrieval card; after UNARY fires, that same node is a
+    // newly derived literal and must adopt the operator step's color.
+    if(step.action==='UNARY' || !map.has(id)) map.set(id,color);
   }
   return map;
 }

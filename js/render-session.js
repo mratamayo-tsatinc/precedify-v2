@@ -330,7 +330,8 @@ function renderCanonicalPlayback(item, assignLabelText, assignLabelCh){
   state0Row.appendChild(h('div',{class:'tl-dot', style:'background:#4b5364;'}));
   const pend0 = pendingNodeId(item.canonicalTrace.steps[0], item.canonicalTrace.treeStates[0]);
   state0Row.appendChild(h('div',{class:'code-out'+(pb.index===0?' row-enter':'')}, renderAssignLabel(true, assignLabelText, assignLabelCh), '= ',
-    renderStaticExpr(item.canonicalTrace.treeStates[0], 0, new Map(), null, pend0, stepColor(0)), ';'));
+    renderStaticExpr(item.canonicalTrace.treeStates[0], 0, new Map(), null, pend0,
+      stepVisualColor(item.canonicalTrace.steps[0],0)), ';'));
   timeline.appendChild(state0Row);
 
   // Loop over EVERY step (0..total-1), not just the ones revealed so far.
@@ -344,7 +345,7 @@ function renderCanonicalPlayback(item, assignLabelText, assignLabelCh){
     const t = item.canonicalTrace.steps[i];
     const isLast = i === pb.index-1;
     const isFinalStep = i === total-1; // the step that resolves to the single derived value
-    const color = stepColor(i);
+    const color = stepVisualColor(t,i);
     const row = h('div',{class:'tl-row'+(isLast?' current':' done')+(revealed?'':' tl-future')});
     row.appendChild(h('div',{class:'tl-dot', style:`background:${color};`+(isLast&&revealed?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''), title: revealed ? stepTooltip(t) : null}));
     // Unrevealed rows get no color map / pending preview / flash — they're
@@ -353,7 +354,8 @@ function renderCanonicalPlayback(item, assignLabelText, assignLabelCh){
     const nextStep = item.canonicalTrace.steps[i+1];
     const pendId = revealed && nextStep ? pendingNodeId(nextStep, item.canonicalTrace.treeStates[i+1]) : null;
     row.appendChild(h('div',{class:'code-out'+(isLast&&revealed?' row-enter':'')}, renderAssignLabel(isFinalStep, assignLabelText, assignLabelCh), '= ',
-      renderStaticExpr(item.canonicalTrace.treeStates[i+1], 0, colorMap, isLast&&revealed ? t.resultNodeId : null, pendId, revealed&&nextStep ? stepColor(i+1) : null), ';'));
+      renderStaticExpr(item.canonicalTrace.treeStates[i+1], 0, colorMap, isLast&&revealed ? t.resultNodeId : null, pendId,
+        revealed&&nextStep ? stepVisualColor(nextStep,i+1) : null), ';'));
     timeline.appendChild(row);
   }
 
@@ -397,9 +399,10 @@ function renderExpressionEvaluationPanel(options){
         : renderStaticFlatExpr(runtime.workingFlat,new Map(),null,null),';',
       trailingActions({isCurrent:true,isFinalRow:resolved(),runtime})));
   } else {
-    const pending = pendingFlatWithColor(runtime.trace[0],stepColor(0));
+    const firstColor = stepVisualColor(runtime.trace[0],0);
+    const pending = pendingFlatWithColor(runtime.trace[0],firstColor);
     initRow.appendChild(h('div',{class:'code-out'},renderBadgeSlot(null),
-      prefixNodes({showLabel:true,ready:false,isCurrent:false,isFinalRow:false,activeColor:stepColor(0),
+      prefixNodes({showLabel:true,ready:false,isCurrent:false,isFinalRow:false,activeColor:firstColor,
         stepCount:0,pendingStep:runtime.trace[0],currentStep:null,flashId:null}),
       renderStaticFlatExpr(runtime.originalFlat,new Map(),null,pending),';'));
   }
@@ -408,7 +411,7 @@ function renderExpressionEvaluationPanel(options){
   runtime.trace.forEach((step,index)=>{
     const isLast = index===runtime.trace.length-1;
     const row = h('div',{class:'tl-row'+(isLast?' current':' done')});
-    const color = stepColor(index);
+    const color = stepVisualColor(step,index);
     const tip = stepTooltip(step,options.revealCorrectness);
     row.appendChild(h('div',{class:'tl-dot',style:`background:${color};`+(isLast?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''),title:tip}));
     const badge = step.action==='EVALUATE' && options.revealCorrectness
@@ -431,10 +434,12 @@ function renderExpressionEvaluationPanel(options){
           : renderStaticFlatExpr(runtime.workingFlat,colors,flashId,null),';',
         trailingActions({isCurrent:true,isFinalRow,runtime})));
     } else {
-      const pending = pendingFlatWithColor(runtime.trace[index+1],stepColor(index+1));
+      const nextStep = runtime.trace[index+1];
+      const nextColor = stepVisualColor(nextStep,index+1);
+      const pending = pendingFlatWithColor(nextStep,nextColor);
       row.appendChild(h('div',{class:'code-out'},renderBadgeSlot(badge),
-        prefixNodes({showLabel:false,ready:false,isCurrent:false,isFinalRow:false,activeColor:stepColor(index+1),
-          stepCount:index+1,pendingStep:runtime.trace[index+1],currentStep:step,flashId}),
+        prefixNodes({showLabel:false,ready:false,isCurrent:false,isFinalRow:false,activeColor:nextColor,
+          stepCount:index+1,pendingStep:nextStep,currentStep:step,flashId}),
         renderStaticFlatExpr(runtime.history[index+1],colors,flashId,pending),';'));
     }
     timeline.appendChild(row);

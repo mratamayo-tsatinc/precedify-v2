@@ -36,19 +36,12 @@
 // state just after) — regardless of which of the two timelines/panels it's
 // looked up in.
 //
-// LINE COLOR (follows dom-helpers.js buildColorMap's provenance rule, not raw
-// step index): a unary token (e.g. "++x") produces TWO distinct steps that share
-// the same resultNodeId — a SUBSTITUTE step (reveals the variable's value
-// into its card) followed by a UNARY step (applies the operator to that
-// same node). buildColorMap() deliberately keeps "first-touch wins" for a
-// given resultNodeId, so the post-operator literal ("18") is rendered in
-// the SUBSTITUTE step's color, not the UNARY step's own color — a value
-// keeps the color of the step that ORIGINATED it, per that file's contract.
-// If a step's line were colored by its own raw index, the UNARY step's line
-// would be drawn in a different color than the very text it points to.
-// originColorForStep() below re-derives the same "earliest step to touch
-// this resultNodeId" rule. Named cards retain a separate stable binding
-// identity color; connector color continues to communicate step provenance.
+// LINE COLOR follows dom-helpers.js stepVisualColor(): retrieving a named
+// binding uses that binding's stable identity color; evaluating an operator
+// uses the generated color for that operation. A unary token can therefore
+// be binding-colored on its SUBSTITUTE step, then operation-colored when the
+// unary operator derives its result. The connector, endpoint, timeline dot
+// and result accent all receive the same semantic step color.
 //
 // ENDPOINT CURVE SHAPE: fixed-length vertical "lead-in" control points (see
 // `lead` below) force the bezier to approach/leave each end near-vertically
@@ -98,17 +91,10 @@ function findConnectorDestEl(row, step){
   return row.querySelector(`[data-token-id="${step.resultNodeId}"]`);
 }
 
-// Mirrors buildColorMap()'s "first-touch wins per resultNodeId" rule (see
-// dom-helpers.js), but for a single arbitrary step index within a given
-// steps array rather than a running map — returns the color of the
-// EARLIEST step that produced this step's resultNodeId, which is always
-// <= i and is the stable provenance color for that step.
+// Uses the same semantic color resolver as timeline dots and rendered results:
+// binding color for value retrieval, generated step color for operations.
 function originColorForStep(steps, i){
-  const id = steps[i].resultNodeId;
-  for(let j=0;j<=i;j++){
-    if(steps[j].resultNodeId===id) return stepColor(j);
-  }
-  return stepColor(i); // unreachable in practice — step i always matches itself
+  return stepVisualColor(steps[i],i);
 }
 
 // Capped vertical lead-in length for the bezier control points, in px.
@@ -144,8 +130,8 @@ function buildConnectorVisuals(panelRect, rows, steps, visibleCount){
     const x1 = s.left + s.width/2 - panelRect.left, y1 = s.bottom - panelRect.top;
     const x2 = d.left + d.width/2 - panelRect.left, y2 = d.top - panelRect.top;
     const isCurrent = i===lastIndex;
-    // Color follows the result's origin step, not this step's raw index —
-    // see the file header re: unary SUBSTITUTE/UNARY pairs sharing an id.
+    // Resolve the semantic step color once, then apply it to both the curve
+    // and its endpoint marker.
     const color = originColorForStep(steps, i);
 
     const halfGap = (y2 - y1) / 2;
