@@ -2,9 +2,11 @@
 // timeline. Only the target/operator label and statement controls are unique.
 function renderAssignmentOperator(statement,ready){
   if(!ready) return isCompoundAssignment(statement)
-    ? h('span',{class:'tok tok-op-muted assignment-operator-static'},statement.operator)
+    ? h('span',{class:'tok tok-op-muted assignment-operator-static',
+        'data-assignment-op-id':statement.id},statement.operator)
     : statement.operator;
   return h('button',{class:'declaration-equals tok tok-op-active tok-colored assignment-operator'+(statement.operator.length>1?' compound':'')+' ready',
+    'data-assignment-op-id':statement.id,
     title:`Apply ${statement.operator} to ${statement.target}`,
     'aria-label':`apply ${statement.operator} to ${statement.target}`,
     onclick:()=>handleTokenClick({type:'commit-assignment'})},statement.operator);

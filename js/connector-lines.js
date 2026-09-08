@@ -82,6 +82,14 @@ function findConnectorSourceEl(row, step){
   if(step.action==='EVALUATE'){
     return row.querySelector(`[data-op-left="${step.leftId}"][data-op-right="${step.rightId}"]`);
   }
+  // Compound assignment completion is intentionally a presentation-only
+  // step: scoring and undo continue to use the semantic expression trace,
+  // while the visible merge still receives the same operator-to-result
+  // connector as an ordinary evaluated operation.
+  if(step.action==='APPLY_ASSIGNMENT'){
+    return row.querySelector(`[data-assignment-op-id="${step.statementId}"]`)
+      || row.querySelector('.assignment-operator, .assignment-operator-static');
+  }
   // SUBSTITUTE, UNARY or READ_TARGET: the token keeps the same id before
   // and after, so compound targets use the standard token-to-card connector.
   return row.querySelector(`[data-token-id="${step.resultNodeId}"]`);
@@ -254,11 +262,28 @@ function drawDeclarationConnectorLines(item){
     const id = panel.getAttribute('data-statement-id');
     const statement = item.program.statements.find(s=>s.id===id);
     const trace = statement && statement.runtime ? statement.runtime.trace : [];
-    if(!trace.length) return;
+    const assignmentResultId = statement && statement.kind==='assignment'
+      ? (statement.runtime.assignmentResultNodeId
+        || (typeof assignmentResultTokenId==='function'
+          ? assignmentResultTokenId(statement) : `assignment-result-${statement.id}`))
+      : null;
+    const compoundApplied = !!(statement && statement.kind==='assignment'
+      && statement.operator!=='=' && statement.runtime.checked
+      && assignmentResultId);
+    // The compound merge row is appended after the expression timeline and
+    // is not part of runtime.trace by design. Add a synthetic visual step so
+    // buildConnectorVisuals maps the last expression row to that merge row.
+    const visualSteps = compoundApplied ? trace.concat({
+      action:'APPLY_ASSIGNMENT',
+      statementId:statement.id,
+      resultNodeId:assignmentResultId
+    }) : trace;
+    if(!visualSteps.length) return;
     const rows = panel.querySelectorAll('.tl-row');
     panel.classList.add('connector-measuring');
     void panel.offsetHeight;
-    const {paths,dots} = buildConnectorVisuals(panel.getBoundingClientRect(),rows,trace,trace.length);
+    const {paths,dots} = buildConnectorVisuals(
+      panel.getBoundingClientRect(),rows,visualSteps,visualSteps.length);
     panel.classList.remove('connector-measuring');
     appendConnectorSvg(panel,paths,dots);
   });
