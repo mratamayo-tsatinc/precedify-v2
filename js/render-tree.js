@@ -27,8 +27,9 @@ function renderStaticExpr(node, ctxPrec, colorMap, flashId, pendingId, pendingCo
   if(node.kind==='variable' || node.kind==='constant'){
     const base = node.kind==='variable' ? 'tok tok-var tok-static' : 'tok tok-const tok-static';
     const isPending = pendingId!=null && node.id===pendingId;
-    const attrs = {class:base+(isPending?' tok-colored':''), 'data-token-id': node.id};
-    if(isPending && pendingColor) attrs.style = `color:${pendingColor};`;
+    const attrs = {class:base+(isPending?' tok-colored':'')+' binding-identity',
+      'data-token-id':node.id,'data-binding-name':node.name,
+      style:bindingIdentityStyle(node.name,node.kind,isPending?pendingColor:null)};
     return h('span',attrs, node.name);
   }
   if(node.kind==='unary'){
@@ -52,8 +53,11 @@ function renderStaticExpr(node, ctxPrec, colorMap, flashId, pendingId, pendingCo
     const nm = node.inner.kind==='literal' ? String(node.inner.value) : node.inner.name;
     const label = node.op==='!' ? ('!'+nm) : (node.form==='prefix' ? node.op+nm : nm+node.op);
     const isPending = pendingId!=null && node.id===pendingId;
-    const attrs = {class:'tok tok-var tok-static'+(isPending?' tok-colored':''), 'data-token-id': node.id};
-    if(isPending && pendingColor) attrs.style = `color:${pendingColor};`;
+    const namedKind = node.inner.kind==='constant' ? 'constant' : (node.inner.kind==='variable' ? 'variable' : null);
+    const attrs = {class:'tok tok-var tok-static'+(isPending?' tok-colored':'')+(namedKind?' binding-identity':''),
+      'data-token-id':node.id,'data-binding-name':namedKind ? nm : null};
+    if(namedKind) attrs.style=bindingIdentityStyle(nm,namedKind,isPending?pendingColor:null);
+    else if(isPending && pendingColor) attrs.style = `color:${pendingColor};`;
     return h('span',attrs, label);
   }
   const p = prec(node.op);

@@ -26,15 +26,15 @@ function renderCompoundAssignmentPrefix(statement,context,isActive){
     const interactive=isActive&&!runtime.checked&&context.isCurrent;
     const pendingRead=context.pendingStep&&context.pendingStep.action==='READ_TARGET';
     const highlighted=interactive||pendingRead;
-    const attrs={class:'tok tok-var '+(highlighted?'tok-colored':'tok-static')+(interactive?' compound-target-ready':''),
-      'data-token-id':tokenId};
+    const attrs={class:'tok tok-var binding-identity '+(highlighted?'tok-colored':'tok-static')+(interactive?' compound-target-ready':''),
+      'data-token-id':tokenId,'data-binding-name':statement.target,
+      style:bindingIdentityStyle(statement.target,'variable',highlighted?context.activeColor:null)};
     if(interactive){
       attrs.tabindex='0'; attrs.role='button';
       attrs['aria-label']=`read the current value of ${statement.target}`;
       attrs.onclick=()=>handleTokenClick({type:'reveal-assignment-target'});
       attrs.onkeydown=(e)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();handleTokenClick({type:'reveal-assignment-target'});}};
     }
-    if(highlighted) attrs.style=`color:${context.activeColor};`;
     targetNode=h('span',attrs,statement.target);
   }
   const ready=isActive&&!runtime.checked&&context.isCurrent&&assignmentReadyToApply(statement);

@@ -57,7 +57,11 @@ function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
     // clicking substitutes its value, same as a plain variable token.
     const nm = op.inner.kind==='literal' ? String(op.inner.value) : op.inner.name;
     const label = op.op==='!' ? ('!'+nm) : (op.form==='prefix' ? op.op+nm : nm+op.op);
-    return h('span',{class:'tok tok-var tok-colored', style:`color:${activeColor};`, tabindex:'0', role:'button', 'aria-label':`substitute ${nm}`, 'data-token-id': op.id,
+    const namedKind = op.inner.kind==='constant' ? 'constant' : (op.inner.kind==='variable' ? 'variable' : null);
+    return h('span',{class:'tok tok-var tok-colored'+(namedKind?' binding-identity':''),
+      style:namedKind ? bindingIdentityStyle(nm,namedKind,activeColor) : `color:${activeColor};`,
+      tabindex:'0', role:'button', 'aria-label':`substitute ${nm}`, 'data-token-id':op.id,
+      'data-binding-name':namedKind ? nm : null,
       onclick:()=>handleTokenClick({type:'substitute', id:op.id}),
       onkeydown:(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleTokenClick({type:'substitute', id:op.id}); } }
     }, label);
@@ -68,8 +72,10 @@ function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
     const isFlash = flashId!=null && op.id===flashId;
     return renderValueCard({id:op.id, name:op.name, value:op.declaredValue, kind:op.kind, color:col, isFlash});
   }
-  const cls = (op.kind==='variable' ? 'tok tok-var' : 'tok tok-const') + ' tok-colored';
-  return h('span',{class:cls, style:`color:${activeColor};`, tabindex:'0', role:'button', 'aria-label':`substitute ${op.name}`, 'data-token-id': op.id,
+  const cls = (op.kind==='variable' ? 'tok tok-var' : 'tok tok-const') + ' tok-colored binding-identity';
+  return h('span',{class:cls, style:bindingIdentityStyle(op.name,op.kind,activeColor),
+    tabindex:'0', role:'button', 'aria-label':`substitute ${op.name}`, 'data-token-id':op.id,
+    'data-binding-name':op.name,
     onclick:()=>handleTokenClick({type:'substitute', id:op.id}),
     onkeydown:(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleTokenClick({type:'substitute', id:op.id}); } }
   }, op.name);
@@ -140,8 +146,11 @@ function renderStaticFlatOperand(op, colorMap, flashId, pending){
     const nm = op.inner.kind==='literal' ? String(op.inner.value) : op.inner.name;
     const label = op.op==='!' ? ('!'+nm) : (op.form==='prefix' ? op.op+nm : nm+op.op);
     const isPending = pending && pending.type==='substitute' && pending.id===op.id;
-    const attrs = {class:'tok tok-var tok-static'+(isPending?' tok-colored':''), 'data-token-id': op.id};
-    if(isPending) attrs.style = `color:${pending.color};`;
+    const namedKind = op.inner.kind==='constant' ? 'constant' : (op.inner.kind==='variable' ? 'variable' : null);
+    const attrs = {class:'tok tok-var tok-static'+(isPending?' tok-colored':'')+(namedKind?' binding-identity':''),
+      'data-token-id':op.id,'data-binding-name':namedKind ? nm : null};
+    if(namedKind) attrs.style=bindingIdentityStyle(nm,namedKind,isPending?pending.color:null);
+    else if(isPending) attrs.style = `color:${pending.color};`;
     return h('span',attrs, label);
   }
   if(op.resolved){
@@ -149,10 +158,11 @@ function renderStaticFlatOperand(op, colorMap, flashId, pending){
     const isFlash = flashId!=null && op.id===flashId;
     return renderValueCard({id:op.id, name:op.name, value:op.declaredValue, kind:op.kind, color:col, isFlash});
   }
-  const base = op.kind==='variable' ? 'tok tok-var tok-static' : 'tok tok-const tok-static';
+  const base = (op.kind==='variable' ? 'tok tok-var tok-static' : 'tok tok-const tok-static')+' binding-identity';
   const isPending = pending && pending.type==='substitute' && pending.id===op.id;
-  const attrs = {class:base+(isPending?' tok-colored':''), 'data-token-id': op.id};
-  if(isPending) attrs.style = `color:${pending.color};`;
+  const attrs = {class:base+(isPending?' tok-colored':''), 'data-token-id':op.id,
+    'data-binding-name':op.name,
+    style:bindingIdentityStyle(op.name,op.kind,isPending?pending.color:null)};
   return h('span',attrs, op.name);
 }
 function renderStaticFlatExpr(flat, colorMap, flashId, pending){

@@ -36,8 +36,8 @@
 // state just after) — regardless of which of the two timelines/panels it's
 // looked up in.
 //
-// LINE COLOR (must match dom-helpers.js buildColorMap's rule, not raw step
-// index): a unary token (e.g. "++x") produces TWO distinct steps that share
+// LINE COLOR (follows dom-helpers.js buildColorMap's provenance rule, not raw
+// step index): a unary token (e.g. "++x") produces TWO distinct steps that share
 // the same resultNodeId — a SUBSTITUTE step (reveals the variable's value
 // into its card) followed by a UNARY step (applies the operator to that
 // same node). buildColorMap() deliberately keeps "first-touch wins" for a
@@ -47,8 +47,8 @@
 // If a step's line were colored by its own raw index, the UNARY step's line
 // would be drawn in a different color than the very text it points to.
 // originColorForStep() below re-derives the same "earliest step to touch
-// this resultNodeId" rule so every line's color always matches its
-// destination token's actual displayed color, in either timeline.
+// this resultNodeId" rule. Named cards retain a separate stable binding
+// identity color; connector color continues to communicate step provenance.
 //
 // ENDPOINT CURVE SHAPE: fixed-length vertical "lead-in" control points (see
 // `lead` below) force the bezier to approach/leave each end near-vertically
@@ -102,8 +102,7 @@ function findConnectorDestEl(row, step){
 // dom-helpers.js), but for a single arbitrary step index within a given
 // steps array rather than a running map — returns the color of the
 // EARLIEST step that produced this step's resultNodeId, which is always
-// <= i and is the same color the destination token is actually displayed
-// in, whichever timeline `steps` came from.
+// <= i and is the stable provenance color for that step.
 function originColorForStep(steps, i){
   const id = steps[i].resultNodeId;
   for(let j=0;j<=i;j++){
@@ -145,9 +144,8 @@ function buildConnectorVisuals(panelRect, rows, steps, visibleCount){
     const x1 = s.left + s.width/2 - panelRect.left, y1 = s.bottom - panelRect.top;
     const x2 = d.left + d.width/2 - panelRect.left, y2 = d.top - panelRect.top;
     const isCurrent = i===lastIndex;
-    // Color follows the destination token's ACTUAL displayed color (origin
-    // step), not this step's own raw index — see file header re: unary
-    // SUBSTITUTE/UNARY pairs sharing a resultNodeId.
+    // Color follows the result's origin step, not this step's raw index —
+    // see the file header re: unary SUBSTITUTE/UNARY pairs sharing an id.
     const color = originColorForStep(steps, i);
 
     const halfGap = (y2 - y1) / 2;

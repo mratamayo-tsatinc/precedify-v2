@@ -29,6 +29,11 @@ function render(){
   container.innerHTML = '';
   renderProgramItem(container, currentItem());
 
+  // Follow only genuinely new live-work rows. This runs before the memory
+  // panel measures animation coordinates, so an enabled value flight never
+  // targets a position that moves underneath it.
+  if(typeof handleLiveStepAutoScroll === 'function') handleLiveStepAutoScroll(currentItem());
+
   // Mount at the program boundary so this authoritative panel refreshes for
   // legacy expressions and for every declaration in a statement chain.
   if(typeof renderVariableFinalFloat === 'function') renderVariableFinalFloat(currentItem());

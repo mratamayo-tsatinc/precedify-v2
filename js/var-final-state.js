@@ -166,9 +166,8 @@ function originColorForNode(trace, nodeId){
 //   committed    — true once this binding's trigger has actually fired
 //   flashColor   — the origin color of the value currently shown (see
 //                  originColorForNode above), or null if nothing has fired
-//                  yet. Applied to the card permanently once committed (not
-//                  just during the pulse), matching how every other
-//                  per-step color in this app works.
+//                  yet. Used only for the arrival pulse; the card itself
+//                  keeps its stable binding-identity color.
 function resolveBindingLive(binding, item){
   if(binding.trigger==='program-assignment'){
     const memory = item.program && item.program.memory && item.program.memory[binding.name];

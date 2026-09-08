@@ -171,6 +171,7 @@ function animateVarFinalMemoryToExpression(item, action, applyAction){
   clone.style.left = sourceRect.left+'px';
   clone.style.top = sourceRect.top+'px';
   clone.style.width = sourceRect.width+'px';
+  clone.style.height = sourceRect.height+'px';
   clone.style.margin = '0';
   clone.style.transform = 'none';
   document.body.appendChild(shield);
@@ -230,10 +231,11 @@ function animateVarFinalMemoryToExpression(item, action, applyAction){
   requestAnimationFrame(()=>{
     clone.style.transition =
       `left ${durationMs}ms cubic-bezier(.22,.72,.22,1), top ${durationMs}ms cubic-bezier(.22,.72,.22,1), `+
-      `width ${durationMs}ms ease, opacity ${durationMs}ms ease`;
+      `width ${durationMs}ms ease, height ${durationMs}ms ease, opacity ${durationMs}ms ease`;
     clone.style.left = destinationRect.left+'px';
     clone.style.top = destinationRect.top+'px';
     clone.style.width = Math.max(destinationRect.width,28)+'px';
+    clone.style.height = destinationRect.height+'px';
     clone.style.opacity = '0.72';
   });
   return true;
@@ -615,6 +617,7 @@ function spawnVarFinalFlyingToken(f, originRect, destRect){
   clone.style.left = originRect.left+'px';
   clone.style.top = originRect.top+'px';
   clone.style.width = originRect.width+'px';
+  clone.style.height = originRect.height+'px';
   clone.style.margin = '0';
   clone.style.transform = 'none';
   document.body.appendChild(clone);
@@ -631,10 +634,11 @@ function spawnVarFinalFlyingToken(f, originRect, destRect){
   const opacityDelayMs = Math.round(durationMs * 0.6);
   clone.style.transition =
     `left ${durationMs}ms cubic-bezier(.3,.7,.2,1), top ${durationMs}ms cubic-bezier(.3,.7,.2,1), `+
-    `width ${durationMs}ms ease, opacity ${durationMs}ms ease ${opacityDelayMs}ms`;
+    `width ${durationMs}ms ease, height ${durationMs}ms ease, opacity ${durationMs}ms ease ${opacityDelayMs}ms`;
   clone.style.left = destRect.left+'px';
   clone.style.top = destRect.top+'px';
   clone.style.width = destRect.width+'px';
+  clone.style.height = destRect.height+'px';
 
   let done = false;
   const finish = ()=>{
@@ -654,7 +658,9 @@ function spawnVarFinalFlyingToken(f, originRect, destRect){
 function settleVarFinalFlight(f, color){
   const bodyEl = f.cardEl.querySelector('.tok-card-body');
   if(bodyEl) bodyEl.textContent = formatValue(f.value);
-  if(color){ f.cardEl.style.borderColor = color; f.cardEl.style.color = color; }
+  if(color && f.cardEl.style && typeof f.cardEl.style.setProperty==='function'){
+    f.cardEl.style.setProperty('--step-color',color);
+  }
   f.cardEl.classList.add('tok-card-flash');
   if(f.binding) f.binding._lastDisplayValue=f.value;
   if(f.mergeRuntime) f.mergeRuntime.assignmentMergePending=false;

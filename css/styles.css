@@ -58,7 +58,7 @@ body{
   min-height:100vh;
   -webkit-font-smoothing:antialiased;
   /* JetBrains Mono ships contextual-alternate ligatures that visually merge
-     "<=" "&gt;=" "==" "!=" "&&" "||" into single glyphs (e.g. "â‰¤"). Every
+     "<=" "&gt;=" "==" "!=" "&&" "||" into single glyphs (e.g. "≤"). Every
      operator in this app must read back exactly as the keyboard characters
      the student would type, so ligatures are disabled globally; this
      property inherits into every mono-font element (.code-line, .code-out,
@@ -85,8 +85,8 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .tagline{color:var(--text-dim);font-size:13.5px;margin:0 0 28px;line-height:1.5;max-width:64ch;}
 
 /* Header uses the same .login-icon class as the login screen for visual
-   consistency, but at header scale â€” smaller, static (no pulse), tighter
-   corners â€” rather than the large animated version sized for the centered
+   consistency, but at header scale — smaller, static (no pulse), tighter
+   corners — rather than the large animated version sized for the centered
    login card. */
 .app-header .login-icon {
   width: 32px;
@@ -239,7 +239,7 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 }
 .code-line .kw{color:#5a6478;}
 /* Declaration lines (int x = 19; etc.) are part of the real source the
-   student is meant to read, not de-emphasized context â€” they get the same
+   student is meant to read, not de-emphasized context — they get the same
    full-brightness text color as the assignment line below them. Only the
    assignment line keeps the extra bottom padding (see .active-line), since
    that spacing exists to separate the source panel from the evaluation
@@ -277,14 +277,14 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .tl-row.tl-future{opacity:0;pointer-events:none;}
 /* Fixed font-size (not varied per done/current) is required so that the
    "=" column below (see .assign-label / .badge-slot) lands at an identical
-   pixel offset on every row â€” a size difference would silently break the
+   pixel offset on every row — a size difference would silently break the
    alignment even though the character COUNT before "=" is always equal. */
 .code-out{font-family:var(--mono);font-size:14.5px;line-height:2.3;}
 @keyframes rise{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
 /* Compact correctness badge, inline with the expression itself (not a
    separate text line). Full step detail ("evaluate 6 + 18 -> 24") is kept
    as a title/aria attribute for hover + accessibility, per the brief's
-   "unless needed in feedback or accessibility" carve-out â€” not printed. */
+   "unless needed in feedback or accessibility" carve-out — not printed. */
 .step-badge{
   display:inline-flex;align-items:center;justify-content:center;
   width:15px;height:15px;border-radius:50%;margin-right:7px;
@@ -310,7 +310,7 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 }
 
 /* result-connection: a token's TEXT is colored (no background/box) to match
-   the step that produced it â€” the operator/substitution that's "responsible"
+   the step that produced it — the operator/substitution that's "responsible"
    for a value uses the same color as the value itself once it lands. Color
    is applied inline per-token via JS; these classes just add weight and,
    for the value that was *just* produced, a brief brightness pulse. */
@@ -320,7 +320,7 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 
 /* resolved variable/constant "memory card": once substituted, a variable or
    constant keeps showing its name (header) above its value (body) instead of
-   collapsing into a bare number â€” a reminder that the value was pulled from
+   collapsing into a bare number — a reminder that the value was pulled from
    memory, not typed as a literal. This card persists through every render
    (live interaction, historical rows, answer-key playback) until the value
    is actually consumed by an EVALUATE step, at which point the result is a
@@ -329,7 +329,8 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
   display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
   gap:4px;
   vertical-align:middle;
-  border:1px solid var(--line);border-radius:7px;
+  border:1px solid var(--binding-color,var(--line));border-radius:7px;
+  color:var(--binding-color,var(--text));
   background:var(--panel-alt);
   padding:5px 9px 6px;
   margin:0 3px;
@@ -344,7 +345,14 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .tok-card-body{
   font-family:var(--mono);font-size:13px;font-weight:700;
 }
-.tok-card-flash{animation:colorFlash .6s ease;}
+.tok-card-flash{animation:bindingCardFlash .6s ease;}
+@keyframes bindingCardFlash{
+  0%{
+    filter:brightness(1.8);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--step-color,var(--binding-color)) 32%,transparent);
+  }
+  100%{filter:brightness(1);box-shadow:0 0 0 0 transparent;}
+}
 
 /* Wraps a still-pending unary's [operator symbol] + [memory card] as one
    inline-aligned unit (used once the wrapped variable has been substituted
@@ -353,12 +361,12 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
    operator, mirroring how other ready tokens invite a tap. */
 .unary-token-group{display:inline-flex;align-items:center;gap:1px;}
 /* An inline-flex box sitting inside a line of text is aligned to that line
-   using the BASELINE OF ITS FIRST IN-FLOW CHILD (CSS Flexbox spec) â€” not a
+   using the BASELINE OF ITS FIRST IN-FLOW CHILD (CSS Flexbox spec) — not a
    fixed point on the group's own box. Prefix ("++x") puts the small
    operator glyph first, so the group inherits that glyph's ordinary text
    baseline. Postfix ("x++") puts the two-line .tok-card first instead, so
    the group inherits the CARD's own internal baseline (from its value line)
-   â€” a different anchor point entirely. Same visual component, same
+   — a different anchor point entirely. Same visual component, same
    surrounding text, but two different alignment rules depending purely on
    which side the operator happened to render on. That's the actual root
    cause of the prefix/postfix drift: not a per-token tuning gap, but the
@@ -369,13 +377,13 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .unary-token-group{vertical-align:middle;}
 /* A standalone .tok-card (e.g. a resolved constant with no unary operator,
    like RATE) gets vertical-align:middle PLUS an extra translateY(-4px)
-   nudge (see .tok-card below) â€” that -4px was tuned empirically so the
+   nudge (see .tok-card below) — that -4px was tuned empirically so the
    card's visual center lands correctly relative to surrounding text. Inside
    a unary-token-group, that same -4px is cancelled on the CARD itself (see
    .unary-token-group .tok-card below) because stacking it on top of the
    group's own flex centering pushed the card too far up. But cancelling it
    there without compensating anywhere else left the group 4px LOWER than a
-   plain standalone card â€” the exact RATE-vs-x/y offset seen in the
+   plain standalone card — the exact RATE-vs-x/y offset seen in the
    screenshots. Applying the same -4px to the GROUP instead (once, to the
    whole unit) restores parity: both a lone card and a unary-wrapped card
    now land on the identical final vertical position, since the group's
@@ -385,16 +393,16 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 /* .tok-card's translateY(-4px) is tuned for a card sitting alone in normal
    inline text flow, nudging it to match the surrounding text baseline. Inside
    a unary-token-group, the card is instead a flex child of a container that
-   already centers it via align-items:center â€” stacking the inline-flow nudge
+   already centers it via align-items:center — stacking the inline-flow nudge
    on top of that flex centering pushes the card up past center, so the
    operator symbol beside it reads as vertically misaligned. Cancel it here. */
 .unary-token-group .tok-card{transform:none;}
 /* The operator glyph (++/--/!) next to the card would otherwise inherit
-   .code-out's line-height:2.3 â€” sized for a full text row, not a lone
+   .code-out's line-height:2.3 — sized for a full text row, not a lone
    2-character symbol. Centering that glyph inside the resulting oversized
    line box means relying on the browser to split its extra half-leading
    evenly above/below a short glyph, which different font rasterizers do
-   slightly differently â€” the box itself lands center-aligned against the
+   slightly differently — the box itself lands center-aligned against the
    card (per align-items:center above) but the visible ink can still drift
    off that center by a few px depending on renderer. Pinning line-height to
    the glyph's own natural size removes that ambiguity, and also keeps the
@@ -406,6 +414,11 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 
 .tok-static{cursor:default;border-bottom:none;}
 .tok-static:hover{background:none;}
+.binding-identity{color:var(--binding-color);}
+.tok.binding-identity{border-bottom-color:color-mix(in srgb,var(--binding-color) 55%,transparent);}
+.tok.binding-identity:not(.tok-static):hover{
+  background:color-mix(in srgb,var(--binding-color) 14%,transparent);
+}
 
 /* ---------- answer-key playback ---------- */
 /* position:relative so its own connector-svg overlay (connector-lines.js
@@ -551,7 +564,7 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
    drawCanonicalConnectorLines() spend measuring element positions, on
    whichever of the two timeline panels is being measured. A row/token that
    just entered this render (row-enter, tok-card-flash, tok-colored-flash)
-   is mid-CSS-animation at that instant â€” getBoundingClientRect() would
+   is mid-CSS-animation at that instant — getBoundingClientRect() would
    report its STARTING offset, not where it settles a moment later,
    producing a connector line anchored to the wrong point on exactly the
    newest step. Canceling the animation for the measurement snapshot forces
@@ -577,8 +590,8 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .link-toggle.active{ color:var(--op-glow); text-decoration:none; }
 
 /* ---------- variable final state (var-final-state.js) ---------- */
-/* Sits at the bottom of the SAME .eval-panel box, separated by a divider â€”
-   not its own bordered panel â€” since it's a coda to the evaluation, not a
+/* Sits at the bottom of the SAME .eval-panel box, separated by a divider —
+   not its own bordered panel — since it's a coda to the evaluation, not a
    competing section. Static (doesn't depend on trace/checked state), so no
    entrance animation: it's just always there, same as the Source panel. */
 .var-final-panel{
@@ -589,20 +602,31 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
   font-weight:700;margin-bottom:11px;
 }
 /* Each binding (declared variable OR the statement's own assignment
-   target, "result" â€” see var-final-state.js's binding model) renders as
-   its own memory card + a short status line underneath, wrapped in a flex
-   row so the section reflows naturally regardless of how many bindings a
-   given profile/expression produces. */
-.var-final-list{display:flex;flex-wrap:wrap;gap:16px;}
+   target, "result" — see var-final-state.js's binding model) renders as
+   its own fixed-size memory card + a short status line underneath. A grid
+   keeps every slot aligned while still reflowing for narrow screens. */
+.var-final-list{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(92px,1fr));
+  gap:14px 10px;
+}
 .var-final-row{
   display:flex;flex-direction:column;align-items:center;gap:6px;
-  min-width:56px;
+  min-width:0;width:100%;
 }
 /* Cards here sit in a block-level flex column, not inline text, so the
    inline-flow baseline nudge .tok-card normally applies (tuned for sitting
    next to running text elsewhere in the app) would just misalign it
-   against its own tag underneath â€” cancel it in this context only. */
-.var-final-row .tok-card{transform:none;}
+   against its own tag underneath — cancel it in this context only. */
+.var-final-row .tok-card{
+  transform:none;
+  width:68px;height:52px;
+  margin:0;padding:5px 6px 6px;
+}
+.var-final-row .tok-card-head,
+.var-final-row .tok-card-body{
+  display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 .vf-tag{
   font-family:var(--ui);font-size:11px;color:var(--text-mute);line-height:1.4;
   display:inline-flex;align-items:center;gap:4px;cursor:help;
@@ -610,12 +634,11 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .vf-tag.vf-unchanged{font-style:italic;}
 .vf-hint-icon{font-size:10px;color:var(--text-mute);opacity:0.7;}
 /* A binding whose trigger has actually fired (prefix mid-derivation, or
-   postfix/target once the statement completes) gets its tag brightened â€”
-   the same "something happened here" visual language the timeline uses â€”
+   postfix/target once the statement completes) gets its tag brightened —
+   the same "something happened here" visual language the timeline uses —
    so a glance down this row flags exactly which bindings have changed so
-   far. The card itself already carries the color of the step that produced
-   its current value (applied inline via renderValueCard's `color` option),
-   so this only needs to lift the tag text to match. */
+   far. The card keeps its stable binding-identity color while the step
+   color remains available to its one-shot arrival pulse. */
 .var-final-row.var-final-changed .vf-tag{color:var(--text-dim);}
 
 /* ========== LOGIN FORM STYLES ========== */
@@ -899,7 +922,7 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
   max-width: 500px;
   width: 90%;
   max-height: 80vh;
-  /* No overflow/scroll here â€” header/footer stay fixed. Individual modals
+  /* No overflow/scroll here — header/footer stay fixed. Individual modals
      that need internal scrolling (e.g. the score summary's profile
      breakdown) scope it to their own inner element instead, so the
      header/total/toggle never move while that inner list scrolls. */
@@ -1555,7 +1578,7 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
     padding: 1rem;
     padding-top: 4rem;
     /* Left (brand/tagline) and right (mode tag, toggles, Scores) no longer
-       fight for one row's width â€” that's what was pushing the right side
+       fight for one row's width — that's what was pushing the right side
        past the viewport edge, where .content-area's overflow:hidden (see
        above) clipped it out of view instead of it ever getting a chance to
        scroll or wrap into place. Wrapping the header itself lets the
@@ -1568,8 +1591,8 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 
   .app-header-left {
     /* Without an explicit basis, flex:1's default 0% basis lets this
-       shrink-to-content, which â€” combined with .user-status now being
-       allowed onto its own wrapped row below â€” is exactly what makes room
+       shrink-to-content, which — combined with .user-status now being
+       allowed onto its own wrapped row below — is exactly what makes room
        for that second row instead of both columns still cramming into one. */
     flex-basis: 100%;
   }
@@ -1712,7 +1735,7 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
   font-weight: 700;
 }
 
-/* Status dot overlay â€” absolutely positioned so it stays visible even when
+/* Status dot overlay — absolutely positioned so it stays visible even when
    .active's gradient background is also applied to the same button. */
 .item-page-btn { position: relative; }
 .item-page-btn.item-page-correct::after,
@@ -1788,7 +1811,7 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 }
 
 /* Mobile: reclaim the fixed-width "int result" label and correctness-badge
-   slot that normally sit to the left of "=" â€” that reserved space exists
+   slot that normally sit to the left of "=" — that reserved space exists
    purely to keep the "=" column aligned across rows (see render-session.js),
    which matters far less than screen width on a narrow viewport. Both
    elements set their own width via inline style (not a stylesheet rule),

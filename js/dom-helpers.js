@@ -36,23 +36,53 @@ function h(tag, attrs, ...children){
 // A required-shape object makes that class of mistake impossible — a typo'd
 // or missing key is undefined/obviously wrong rather than silently shifted.
 //
+// Stable binding colors identify the same named memory slot across declaration,
+// assignment and expression views. Step colors remain a separate timeline/
+// connector channel and are exposed as --step-color for the arrival pulse.
+const VARIABLE_BINDING_PALETTE = Object.freeze([
+  '#6fb7ff','#4fd9b0','#f6c85f','#ff8fb8','#5eead4','#fb923c','#93c5fd','#a3e635'
+]);
+const CONSTANT_BINDING_PALETTE = Object.freeze([
+  '#c39bff','#a78bfa','#e879f9','#f0abfc','#818cf8','#d8b4fe','#f472b6','#c4b5fd'
+]);
+
+function bindingIdentityColor(name,kind){
+  const palette = kind==='constant' ? CONSTANT_BINDING_PALETTE : VARIABLE_BINDING_PALETTE;
+  const text = String(name==null ? '' : name);
+  let hash = 2166136261;
+  for(let i=0;i<text.length;i++){
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash,16777619);
+  }
+  return palette[(hash>>>0)%palette.length];
+}
+
+function bindingIdentityStyle(name,kind,stepColorValue){
+  let style = `--binding-color:${bindingIdentityColor(name,kind)};color:var(--binding-color);`;
+  if(stepColorValue) style += `--step-color:${stepColorValue};`;
+  return style;
+}
+
 // opts: {id, name, value, kind, color, isFlash}
 //   id      - the node's own id (same id it carries in the trace/flat model);
 //             stamped as data-token-id so connector-lines.js can locate this
 //             exact card in the DOM. Has no effect on layout/scoring.
 //   name    - display name shown on the card's header line (e.g. "x", "RATE")
 //   value   - the resolved numeric/boolean value shown on the card's body line
-//   kind    - 'variable' | 'constant' (only used to pick the border style)
-//   color   - optional hex color string (per-step color) for border+text
+//   kind    - 'variable' | 'constant' (selects identity palette + border style)
+//   color   - optional per-step accent used by the arrival pulse, never as identity
 //   isFlash - whether to play the brief "just resolved" highlight animation
 function renderValueCard(opts){
   const {id, name, value, kind, color, isFlash} = opts;
-  const cls = 'tok-card '+(kind==='constant' ? 'tok-card-const' : 'tok-card-var')+(isFlash?' tok-card-flash':'');
-  const attrs = {class:cls, 'data-token-id': id};
-  if(color) attrs.style = `border-color:${color};color:${color};`;
+  const cls = 'tok-card binding-identity '+(kind==='constant' ? 'tok-card-const' : 'tok-card-var')+(isFlash?' tok-card-flash':'');
+  const displayValue = formatValue(value);
+  const attrs = {class:cls, 'data-token-id':id, 'data-binding-name':name,
+    style:bindingIdentityStyle(name,kind,color),
+    title:`${name} = ${displayValue}`,
+    'aria-label':`${kind==='constant'?'constant':'variable'} ${name}, value ${displayValue}`};
   return h('span', attrs,
     h('span',{class:'tok-card-head'}, name),
-    h('span',{class:'tok-card-body'}, formatValue(value))
+    h('span',{class:'tok-card-body'}, displayValue)
   );
 }
 
@@ -78,10 +108,9 @@ function hexToRgba(hex, alpha){
 // Persistent id -> color map: for each of the first `count` steps in
 // `steps`, the node that step PRODUCED (resultNodeId — a new literal's id
 // for EVALUATE, or the same var/const id it always had for SUBSTITUTE) is
-// tagged with that step's color. This mapping never changes once made, so a
-// value keeps the color of the step that created it in every later render —
-// even after it's consumed as an operand by a subsequent operator — instead
-// of being repainted with whichever step happens to use it next.
+// tagged with that step's provenance color. Derived literals keep it in later
+// renders; named variable/constant cards keep their separate binding color and
+// retain this step color only as an arrival/connector accent.
 function buildColorMap(steps, count){
   const map = new Map();
   const n = count==null ? steps.length : count;
