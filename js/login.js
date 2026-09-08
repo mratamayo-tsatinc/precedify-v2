@@ -502,6 +502,7 @@ function itemPageStatus(item){
   if (!item) return '';
   if (item.checked) return item.wasCorrectFinal ? 'correct' : 'incorrect';
   if (item.trace && item.trace.length > 0) return 'attempted';
+  if (item.program && (item.program.cursor>0 || item.program.statements.some(s=>s.runtime && s.runtime.trace && s.runtime.trace.length>0))) return 'attempted';
   return '';
 }
 const ITEM_STATUS_CLASS = {correct:'item-page-correct', incorrect:'item-page-incorrect', attempted:'item-page-attempted'};

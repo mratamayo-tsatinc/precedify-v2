@@ -50,10 +50,47 @@ function renderBadgeSlot(badge){
   return h('span',{class:'badge-slot', style:'display:inline-block;width:22px;'}, badge);
 }
 
+function renderInlineEvaluationActions(options){
+  options=options||{};
+  const actions=[];
+  if(options.canUndo){
+    actions.push(h('button',{class:'inline-eval-action inline-undo-action',type:'button',
+      title:'Undo last action','aria-label':'Undo last action',onclick:handleUndo},
+      h('i',{class:'fa-solid fa-rotate-left','aria-hidden':'true'})));
+  }
+  if(options.canCheck){
+    actions.push(h('button',{class:'inline-eval-action inline-check-action',type:'button',
+      title:'Check answer','aria-label':'Check answer',onclick:handleCheck},
+      h('i',{class:'fa-solid fa-check','aria-hidden':'true'}),h('span',{},'Check')));
+  }
+  return actions.length ? h('span',{class:'inline-eval-actions'},...actions) : null;
+}
+
+function renderItemResetControl(show){
+  if(!show) return null;
+  return h('div',{class:'item-reset-control'},
+    h('button',{class:'item-reset-button',type:'button',onclick:handleReset},'Reset item'));
+}
+
+// Shared source-code panel for every expression-shaped statement. Keeping the
+// complete statement outside the compact evaluation rows is especially
+// important on mobile, where the rows intentionally hide their LHS label.
+function renderExpressionSourcePanel(title, lines, panelClass){
+  const panel = h('div',{class:'source-panel'+(panelClass?' '+panelClass:'')});
+  panel.appendChild(h('div',{class:'panel-title'},title));
+  (lines || []).forEach(line=>{
+    const value = typeof line==='string' ? line : line.text;
+    const lineClass = typeof line==='string' ? 'active-line' : (line.className || 'active-line');
+    panel.appendChild(h('div',{class:`code-line ${lineClass}`},value));
+  });
+  return panel;
+}
+
 // Full step detail as plain text only — used for a hover title / aria-label,
 // never rendered as a visible line. The visible surface is just the badge
 // (see .step-badge) plus the expression's own token colors.
 function stepTooltip(t, revealCorrectness){
+  if(t.action==='READ_TARGET') return `read current ${t.target} → ${formatValue(t.sourceValue)}`;
   if(t.action==='SUBSTITUTE') return `substitute ${t.target} → ${formatValue(t.sourceValue)}`;
   if(t.action==='UNARY') return `apply ${t.op} to ${t.target} → ${formatValue(t.result)}`;
   const order = (!revealCorrectness || t.wasCorrect==null) ? '' : (t.wasCorrect ? ' (correct order)' : ' (out of order)');
@@ -108,122 +145,39 @@ function renderSession(container){
   ));
 
   // SOURCE panel
-  const srcPanel = h('div',{class:'source-panel'});
-  srcPanel.appendChild(h('div',{class:'panel-title'},'Original source'));
-  for(const decl of item.decls){
-    srcPanel.appendChild(h('div',{class:'code-line decl-line'}, declLine(decl, state.language)));
+  const hasInteractiveDeclarations = itemHasInteractiveProgram(item);
+  const sourceLines = [];
+  if(!hasInteractiveDeclarations){
+    for(const decl of item.decls){
+      sourceLines.push({text:declLine(decl,state.language),className:'decl-line'});
+    }
   }
   const originalExprStr = renderString(item.originalTree);
-  srcPanel.appendChild(h('div',{class:'code-line active-line'}, assignLineString(originalExprStr, item.resultName)));
-  container.appendChild(srcPanel);
+  sourceLines.push({text:assignLineString(originalExprStr,item.resultName),className:'active-line'});
+  container.appendChild(renderExpressionSourcePanel(
+    hasInteractiveDeclarations ? 'Final expression' : 'Original source',sourceLines));
 
-  // EVALUATION panel
-  const evalPanel = h('div',{class:'eval-panel'});
-  evalPanel.appendChild(h('div',{class:'panel-title'},'Evaluation'));
-  const timeline = h('div',{class:'timeline'});
-
-  // initial state row
-  const initRow = h('div',{class:'tl-row'+(item.trace.length>0?' done':' current')});
-  initRow.appendChild(h('div',{class:'tl-dot', style:'background:#4b5364;'}));
-  if(item.trace.length===0){
-    // Nothing has been produced yet, so the color map is empty; every
-    // currently-ready operator/token previews stepColor(0), since the
-    // student may pick ANY of them (no forced "correct next" gating).
-    const unresolvedAny0 = collectUnresolvedFlat(item.workingFlat,[]).length>0;
-    initRow.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(null), renderAssignLabel(true, assignLabelText, assignLabelCh), '= ',
-      renderInteractiveFlatExpr(item.workingFlat, new Map(), stepColor(0), null, unresolvedAny0), ';'));
-  } else {
-    // Superseded by later rows below; only its own pending operator/token
-    // (the one recorded as firing at step 0) previews step 0's color.
-    const pend0 = pendingFlatWithColor(item.trace[0], stepColor(0));
-    initRow.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(null), renderAssignLabel(true, assignLabelText, assignLabelCh), '= ',
-      renderStaticFlatExpr(item.originalFlat, new Map(), null, pend0), ';'));
-  }
-  timeline.appendChild(initRow);
-
-  // history rows (each trace step) — every row is rendered from its own real
-  // flat-expression snapshot. colorMap accumulates one color per step so far
-  // (stepColor(i) for step i), and that mapping is permanent: once a value is
-  // tagged with the color of the step that made it, it keeps that color in
-  // every later row, even after it's consumed as an operand by a subsequent
-  // operator. Full step detail ("evaluate 6 + 18 -> 24") is data-only,
-  // exposed via title/aria-label rather than printed as its own line — only
-  // a compact correct/incorrect badge is shown inline with the expression.
-  // Per the brief (§12): the student must never be told during construction
-  // that a selection was right or wrong — that would defeat the reasoning
-  // activity. This applies identically in Practice and Exam; step
-  // correctness is only ever revealed once the item has been checked. The
-  // ONLY behavioral differences between the two modes are (a) whether the
-  // item can be reset/retried, and (b) whether the correct-solution
-  // playback is offered — both handled elsewhere, not here.
-  const revealCorrectness = item.checked;
-  item.trace.forEach((t, i)=>{
-    const isLast = i === item.trace.length-1;
-    const row = h('div',{class:'tl-row'+(isLast?' current':' done')});
-    const color = stepColor(i);
-    const tip = stepTooltip(t, revealCorrectness);
-    row.appendChild(h('div',{class:'tl-dot', style:`background:${color};`+(isLast?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''), title:tip}));
-    const badge = (t.action==='EVALUATE' && revealCorrectness)
-      ? h('span',{class:'step-badge '+(t.wasCorrect?'ok':'warn'), title:tip, 'aria-label':tip, role:'img'}, h('i',{class:'fa-solid '+(t.wasCorrect?'fa-check':'fa-exclamation')}))
-      : null;
-    const colorMap = buildColorMap(item.trace, i+1);
-    // t (this step) is a stable object living in item.trace, not something
-    // recreated on every render — so a flag written onto it here survives
-    // across the many full re-renders that happen for reasons unrelated to
-    // this row (e.g. once per second while the separate answer-key playback
-    // below is auto-advancing, or a click on any other row/control).
-    // Without this, EVERY row — not just the current one — would replay its
-    // value-flash on every one of those unrelated re-renders, since flashId
-    // was previously being passed unconditionally regardless of whether this
-    // exact step had already been shown before.
-    const flashId = t._flashed ? null : t.resultNodeId;
-    t._flashed = true;
-    // The label ('int <resultName>') is shown only on the row that holds
-    // the truly final, fully-derived value — not merely the "current" row,
-    // which may still be mid-sequence (more operators left to pick).
-    const isFinalRow = isLast && itemFullyResolved(item);
-    if(isLast){
-      const activeColor = stepColor(item.trace.length); // color for whatever the student clicks next
-      const unresolvedAny = collectUnresolvedFlat(item.workingFlat,[]).length>0;
-      const enterCls = t._entered ? '' : ' row-enter';
-      t._entered = true;
-      row.appendChild(h('div',{class:'code-out'+enterCls}, renderBadgeSlot(badge), renderAssignLabel(isFinalRow, assignLabelText, assignLabelCh), '= ',
-        renderInteractiveFlatExpr(item.workingFlat, colorMap, activeColor, flashId, unresolvedAny), ';'));
-    } else {
-      const nextStep = item.trace[i+1];
-      const pend = pendingFlatWithColor(nextStep, stepColor(i+1));
-      row.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(badge), renderAssignLabel(false, assignLabelText, assignLabelCh), '= ',
-        renderStaticFlatExpr(item.history[i+1], colorMap, flashId, pend), ';'));
-    }
-    timeline.appendChild(row);
+  // The same renderer is used by declaration initializers; this invocation
+  // preserves the legacy item as the reference behavior.
+  const evalPanel = renderExpressionEvaluationPanel({
+    runtime:item,
+    labelText:assignLabelText,
+    labelCh:assignLabelCh,
+    title:'Evaluation',
+    panelClass:'eval-panel',
+    interactive:true,
+    revealCorrectness:item.checked,
+    isFullyResolved:()=>itemFullyResolved(item),
+    renderTrailingActions:()=>renderInlineEvaluationActions({
+      canUndo:!item.checked&&canUndoProgram(item),
+      canCheck:!item.checked&&itemFullyResolved(item)
+    })
   });
-
-  evalPanel.appendChild(timeline);
   container.appendChild(evalPanel);
-  // Variable final state now renders as a floating, draggable panel
-  // (var-final-float.js) instead of living inline at the bottom of the eval
-  // panel — see that file for the visibility/fly-in toggles. Must run AFTER
-  // evalPanel is attached above: its optional fly-in mode looks up each
-  // value's origin token in the now-live timeline, the same way
-  // connector-lines.js locates its srcEl/dstEl. Guarded like the other
-  // optional-module hooks in this file (renderMomentFeedbackBlock,
-  // setFeedbackDrawerContent, etc.) so a missing/broken module here can
-  // never break the rest of the session view.
-  if(typeof renderVariableFinalFloat === 'function') renderVariableFinalFloat(item);
-
-  // action bar
-  const canUndo = !item.checked && item.history.length>1;
-  const canCheck = !item.checked && itemFullyResolved(item);
-  const canReset = state.mode==='practice' && !item.checked && item.trace.length>0;
-
-  const actionBar = h('div',{class:'action-bar'},
-    h('div',{class:'btn-group'},
-      h('button',{class:'btn', disabled: !canUndo, onclick:handleUndo}, h('i',{class:'fa-solid fa-rotate-left'}), ' Undo'),
-      canReset ? h('button',{class:'btn btn-ghost', onclick:handleReset}, 'Reset item') : null
-    ),
-    h('button',{class:'btn btn-primary', disabled: !canCheck, onclick:handleCheck}, 'Check answer')
-  );
-  container.appendChild(actionBar);
+  const canReset = state.mode==='practice' && !item.checked && (
+    item.trace.length>0 || (item.program && item.program.cursor>0));
+  const resetControl=renderItemResetControl(canReset);
+  if(resetControl) container.appendChild(resetControl);
 
   if(!itemFullyResolved(item) && !item.checked){
     const unresolvedCount = collectUnresolvedFlat(item.workingFlat,[]).length;
@@ -262,6 +216,11 @@ function renderSession(container){
     ));
     fb.appendChild(h('div',{class:'feedback-stats'},
       h('div',{class:'stat'}, h('div',{class:'sv'}, `${item.correctSteps}/${item.totalOpSteps}`), h('div',{class:'sl'},'steps in correct order')),
+      item.programScoreFacts && item.programScoreFacts.programTotalChecks>0
+        ? h('div',{class:'stat'},
+            h('div',{class:'sv'}, `${item.programScoreFacts.programCorrectChecks}/${item.programScoreFacts.programTotalChecks}`),
+            h('div',{class:'sl'},'program statement checks'))
+        : null,
       h('div',{class:'stat'}, h('div',{class:'sv'}, `${Math.round(item.itemScore*100)}%`), h('div',{class:'sl'},'item score'))
     ));
     // Additive hook for the moment-to-moment feedback module
@@ -276,6 +235,7 @@ function renderSession(container){
     if(state.mode==='practice'){
       fb.appendChild(h('button',{class:'solution-toggle', onclick:toggleSolution}, item.showSolution ? 'Hide correct solution' : 'Show correct solution'));
       if(item.showSolution){
+        if(hasInteractiveDeclarations) fb.appendChild(renderCanonicalDeclarationPrelude(item));
         fb.appendChild(renderCanonicalPlayback(item, assignLabelText, assignLabelCh));
       }
     }
@@ -400,3 +360,118 @@ function renderCanonicalPlayback(item, assignLabelText, assignLabelCh){
   wrap.appendChild(timeline);
   return wrap;
 }
+
+// Shared live-expression renderer. Legacy items and declaration initializers
+// both pass their expression-shaped runtime into this one implementation, so
+// row spacing, LHS reservation, equals alignment, cards, colors, transitions
+// and connector lookup attributes cannot drift between profile types.
+function renderExpressionEvaluationPanel(options){
+  const runtime = options.runtime;
+  const labelText = options.labelText || '';
+  const labelCh = options.labelCh == null ? labelText.length+1 : options.labelCh;
+  const resolved = ()=>!!options.isFullyResolved(runtime);
+  const canInteract = options.interactive !== false;
+  const equalsNode = ready=>typeof options.renderEquals==='function'
+    ? options.renderEquals(ready) : '=';
+  const prefixNodes = context=>typeof options.renderPrefix==='function'
+    ? options.renderPrefix(context)
+    : [renderAssignLabel(context.showLabel,labelText,labelCh),equalsNode(context.ready),' '];
+  const trailingActions = context=>typeof options.renderTrailingActions==='function'
+    ? options.renderTrailingActions(context) : null;
+  const panelAttrs = {class:options.panelClass || 'eval-panel'};
+  if(options.statementId) panelAttrs['data-statement-id'] = options.statementId;
+  const panel = h('div',panelAttrs);
+  panel.appendChild(h('div',{class:'panel-title'},options.title || 'Evaluation'));
+  const timeline = h('div',{class:'timeline'});
+
+  const initRow = h('div',{class:'tl-row'+(runtime.trace.length>0?' done':' current')});
+  initRow.appendChild(h('div',{class:'tl-dot',style:'background:#4b5364;'}));
+  if(runtime.trace.length===0){
+    const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
+    const ready = canInteract && resolved();
+    initRow.appendChild(h('div',{class:'code-out'},renderBadgeSlot(null),
+      prefixNodes({showLabel:true,ready,isCurrent:true,isFinalRow:resolved(),activeColor:stepColor(0),
+        stepCount:0,pendingStep:null,currentStep:null,flashId:null}),
+      canInteract
+        ? renderInteractiveFlatExpr(runtime.workingFlat,new Map(),stepColor(0),null,unresolved)
+        : renderStaticFlatExpr(runtime.workingFlat,new Map(),null,null),';',
+      trailingActions({isCurrent:true,isFinalRow:resolved(),runtime})));
+  } else {
+    const pending = pendingFlatWithColor(runtime.trace[0],stepColor(0));
+    initRow.appendChild(h('div',{class:'code-out'},renderBadgeSlot(null),
+      prefixNodes({showLabel:true,ready:false,isCurrent:false,isFinalRow:false,activeColor:stepColor(0),
+        stepCount:0,pendingStep:runtime.trace[0],currentStep:null,flashId:null}),
+      renderStaticFlatExpr(runtime.originalFlat,new Map(),null,pending),';'));
+  }
+  timeline.appendChild(initRow);
+
+  runtime.trace.forEach((step,index)=>{
+    const isLast = index===runtime.trace.length-1;
+    const row = h('div',{class:'tl-row'+(isLast?' current':' done')});
+    const color = stepColor(index);
+    const tip = stepTooltip(step,options.revealCorrectness);
+    row.appendChild(h('div',{class:'tl-dot',style:`background:${color};`+(isLast?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''),title:tip}));
+    const badge = step.action==='EVALUATE' && options.revealCorrectness
+      ? h('span',{class:'step-badge '+(step.wasCorrect?'ok':'warn'),title:tip,'aria-label':tip,role:'img'},
+          h('i',{class:'fa-solid '+(step.wasCorrect?'fa-check':'fa-exclamation')})) : null;
+    const colors = buildColorMap(runtime.trace,index+1);
+    const flashId = step._flashed ? null : step.resultNodeId;
+    step._flashed = true;
+    const isFinalRow = isLast && resolved();
+    if(isLast){
+      const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
+      const enterClass = step._entered ? '' : ' row-enter';
+      step._entered = true;
+      row.appendChild(h('div',{class:'code-out'+enterClass},renderBadgeSlot(badge),
+        prefixNodes({showLabel:isFinalRow,ready:canInteract&&isFinalRow,isCurrent:true,isFinalRow,
+          activeColor:stepColor(runtime.trace.length),stepCount:index+1,pendingStep:null,
+          currentStep:step,flashId}),
+        canInteract
+          ? renderInteractiveFlatExpr(runtime.workingFlat,colors,stepColor(runtime.trace.length),flashId,unresolved)
+          : renderStaticFlatExpr(runtime.workingFlat,colors,flashId,null),';',
+        trailingActions({isCurrent:true,isFinalRow,runtime})));
+    } else {
+      const pending = pendingFlatWithColor(runtime.trace[index+1],stepColor(index+1));
+      row.appendChild(h('div',{class:'code-out'},renderBadgeSlot(badge),
+        prefixNodes({showLabel:false,ready:false,isCurrent:false,isFinalRow:false,activeColor:stepColor(index+1),
+          stepCount:index+1,pendingStep:runtime.trace[index+1],currentStep:step,flashId}),
+        renderStaticFlatExpr(runtime.history[index+1],colors,flashId,pending),';'));
+    }
+    timeline.appendChild(row);
+  });
+
+  if(typeof options.renderAfterRows==='function') options.renderAfterRows(timeline,{runtime,resolved:resolved()});
+
+  panel.appendChild(timeline);
+  return panel;
+}
+
+function renderCanonicalDeclarationPrelude(item){
+  const wrap = h('div',{class:'canonical-declaration-prelude'});
+  wrap.appendChild(h('div',{class:'panel-title'}, 'Correct program sequence'));
+  item.program.statements.filter(s=>s.kind==='declaration'||s.kind==='assignment').forEach((statement, index)=>{
+    const runtime = statement.runtime;
+    const isDeclaration=statement.kind==='declaration';
+    const source=isDeclaration
+      ? `${declarationKeyword(statement)} ${statement.binding.name} = ${renderString(runtime.originalTree)};`
+      : `${statement.target} ${statement.operator} ${renderString(runtime.originalTree)};`;
+    const target=isDeclaration?statement.binding.name:statement.target;
+    const value=isDeclaration?runtime.expectedValue:runtime.expectedAfter;
+    wrap.appendChild(h('div',{class:'canonical-declaration-row'},
+      h('span',{class:'canonical-declaration-index'}, String(index+1)),
+      h('code',{},source),
+      h('span',{class:'canonical-declaration-result'}, `→ ${target} = ${formatValue(value)}`)
+    ));
+  });
+  return wrap;
+}
+
+// Program Core owns statement dispatch; this renderer remains the exact
+// legacy session renderer for the compatibility statement kind.
+registerStatementRenderer('legacy-expression', ({container, program, isActive})=>{
+  // A one-statement compatibility item renders exactly as before. In an
+  // interactive declaration chain, the final expression stays hidden and
+  // inactive until Program Core advances to it.
+  if(program.statements.length>1 && !isActive) return;
+  renderSession(container);
+});

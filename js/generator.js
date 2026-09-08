@@ -323,6 +323,9 @@ function finalizeProfile(raw){
       unaryWrap: Object.assign({}, DEFAULT_EXTRAS.unaryWrap, (raw.extras && raw.extras.unaryWrap) || {})
     }),
     scoring: Object.assign({}, raw.scoring),
+    // Program behavior is opt-in. Existing profiles omit this field and are
+    // adapted to the unchanged single-expression activity by state.js.
+    program: raw.program ? Object.assign({}, raw.program) : null,
     template: raw.template,
   };
   p._ast = parseTemplate(p.template);

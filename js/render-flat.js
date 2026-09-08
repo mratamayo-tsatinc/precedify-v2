@@ -102,10 +102,13 @@ function renderInteractiveFlatExpr(flat, colorMap, activeColor, flashId, unresol
   }
   return h('span',{}, ...parts);
 }
-// pending = {type:'substitute', id, color} | {type:'evaluate', leftId, rightId, color} | null
+// pending = {type:'substitute', id, color} | {type:'evaluate', leftId, rightId, color} | null.
+// READ_TARGET belongs to the assignment prefix rather than the RHS flat tree,
+// so its pending highlight is rendered by renderCompoundAssignmentPrefix.
 function pendingFlatWithColor(step, color){
   if(!step) return null;
   if(step.action==='SUBSTITUTE' || step.action==='UNARY') return {type:'substitute', id:step.resultNodeId, color};
+  if(step.action==='READ_TARGET') return null;
   return {type:'evaluate', leftId:step.leftId, rightId:step.rightId, color};
 }
 function renderStaticFlatOperand(op, colorMap, flashId, pending){

@@ -27,7 +27,11 @@ function render(){
 
   const container = document.getElementById('app');
   container.innerHTML = '';
-  renderSession(container);
+  renderProgramItem(container, currentItem());
+
+  // Mount at the program boundary so this authoritative panel refreshes for
+  // legacy expressions and for every declaration in a statement chain.
+  if(typeof renderVariableFinalFloat === 'function') renderVariableFinalFloat(currentItem());
 
   if(state.screen==='session'){
     // Keeps the saved exam-mode record current on every state change —
@@ -42,6 +46,7 @@ function render(){
     // the DOM has been built, since it measures real element positions.
     // No-op when state.showConnectors is false or there's no step yet.
     drawConnectorLines(currentItem());
+    if(typeof drawDeclarationConnectorLines === 'function') drawDeclarationConnectorLines(currentItem());
     // Same treatment for the answer-key/canonical playback timeline, when
     // it's currently showing — a separate DOM subtree (.solution-playback)
     // driven by item.canonicalTrace.steps rather than item.trace. No-op

@@ -64,6 +64,28 @@
 // ============================================================================
 
 function buildBindingsForItem(item){
+  if(itemHasInteractiveProgram(item)){
+    const bindings = item.program.statements
+      .filter(statement=>statement.kind==='declaration')
+      .map(statement=>({
+        name:statement.binding.name,
+        kind:statement.binding.kind==='constant' ? 'program-constant' : 'program-variable',
+        trigger:'program-assignment',
+        statementId:statement.id,
+        declaredValue:undefined,
+        finalValue:statement.runtime.expectedValue,
+        unaryNodeId:null, op:null, form:null, _flashed:false
+      }));
+    // A declaration chain still ends in the same assignment expression as a
+    // legacy item. Keep its target in the same memory model for consistent
+    // pending, commit, pulse and fly-in behavior across every profile.
+    bindings.push({
+      name:item.resultName || 'result', kind:'target', trigger:'statement-complete',
+      declaredValue:undefined, finalValue:undefined,
+      unaryNodeId:null, op:null, form:null, _flashed:false
+    });
+    return bindings;
+  }
   const bindings = [];
   for(const op of item.originalFlat.operands){
     if(op.kind==='variable'){
@@ -148,6 +170,19 @@ function originColorForNode(trace, nodeId){
 //                  just during the pulse), matching how every other
 //                  per-step color in this app works.
 function resolveBindingLive(binding, item){
+  if(binding.trigger==='program-assignment'){
+    const memory = item.program && item.program.memory && item.program.memory[binding.name];
+    if(!memory || !memory.initialized){
+      return {hasValue:false, displayValue:null, committed:false, flashColor:null};
+    }
+    const statement = item.program.statements.find(s=>s.id===binding.statementId);
+    const originStatementId=memory.lastStatementId||binding.statementId;
+    const originStatement = item.program.statements.find(s=>s.id===originStatementId) || statement;
+    const trace = originStatement && originStatement.runtime ? originStatement.runtime.trace : [];
+    const lastIdx = trace.length-1;
+    return {hasValue:true, displayValue:memory.value, committed:true,originStatementId,
+      flashColor:lastIdx>=0 ? stepColor(lastIdx) : stepColor(0)};
+  }
   if(binding.trigger==='static'){
     return {hasValue:true, displayValue: binding.declaredValue, committed:true, flashColor:null};
   }
@@ -189,6 +224,12 @@ function resolveBindingLive(binding, item){
 }
 
 function bindingTagText(binding, live){
+  if(binding.kind==='program-constant'){
+    return live.committed ? 'constant assigned — immutable' : 'constant — not yet assigned';
+  }
+  if(binding.kind==='program-variable'){
+    return live.committed ? 'variable assigned' : 'variable — not yet assigned';
+  }
   if(binding.trigger==='static') return 'unchanged';
   if(binding.kind==='target') return live.committed ? 'assigned' : 'not yet assigned';
   if(binding.trigger==='per-step'){
@@ -206,6 +247,8 @@ function bindingTagText(binding, live){
 // render-session.js). Keeps this row from wrapping across two lines per
 // card, which is what was eating horizontal/vertical space on mobile.
 function bindingTagShort(binding, live){
+  if(binding.kind==='program-constant') return live.committed ? 'constant · set' : 'constant · pending';
+  if(binding.kind==='program-variable') return live.committed ? 'assigned' : 'pending';
   if(binding.trigger==='static') return 'unchanged';
   if(binding.kind==='target') return live.committed ? 'assigned' : 'pending';
   return live.committed ? 'applied' : 'pending';
@@ -222,11 +265,13 @@ function renderVariableFinalState(item){
   if(bindings.length===0) return null;
 
   const wrap = h('div',{class:'var-final-panel'});
-  wrap.appendChild(h('div',{class:'var-final-title'},'Variable final state'));
+  wrap.appendChild(h('div',{class:'var-final-title'},
+    itemHasInteractiveProgram(item) ? 'Program variables and constants' : 'Variable final state'));
 
   const list = h('div',{class:'var-final-list'});
   bindings.forEach(b=>{
     const live = resolveBindingLive(b, item);
+    if(live.hasValue) b._lastDisplayValue=live.displayValue;
     // A binding's card pulses exactly once, the first render where it's
     // found committed. `_flashed` lives on the cached binding object (not
     // the DOM), so it survives the many unrelated re-renders this app does
@@ -240,7 +285,7 @@ function renderVariableFinalState(item){
       id: 'vf-'+b.name,
       name: b.name,
       value: live.hasValue ? live.displayValue : '—',
-      kind: 'variable',
+      kind: b.kind==='program-constant' ? 'constant' : 'variable',
       color: live.flashColor,
       isFlash
     }));

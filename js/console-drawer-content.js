@@ -402,6 +402,19 @@
         'Resolve the relational comparison to true or false first — that always happens before && or ||.',
         'Resolve any ! on a boolean variable next, then combine everything left to right with && / ||.'
       ]
+    },
+    'declaration-chain': {
+      heading: 'Declaration Chain',
+      rule: [
+        'Execute declarations from top to bottom so each name receives a value in memory.',
+        'A later initializer may use a variable or constant assigned by an earlier statement. Resolve that initializer first, then click = to commit its value.',
+        'The final expression unlocks only after every required declaration has been assigned.'
+      ],
+      buildExampleTree: () => makeBinOp('-', makeBinOp('*', makeNamed('variable', 'y', 15), makeNamed('constant', 'RATE', 2)), makeNamed('variable', 'x', 10)),
+      tips: [
+        'A name cannot be substituted until its declaration has completed.',
+        'Declaration checks and final-expression checks share the item’s point budget.'
+      ]
     }
   };
 

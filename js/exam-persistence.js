@@ -99,6 +99,19 @@ function tryResumeExamSession(email){
   state.itemIndexByProfile = record.itemIndexByProfile || {};
   state.sessionSeed = record.sessionSeed;
   state.itemsByProfile = record.itemsByProfile;
+
+  // A saved exam from an earlier release may not contain profiles added by
+  // this one. Replay the seeded generation sequence and retain only missing
+  // profiles; existing student work is never regenerated or overwritten.
+  const missingProfileIds = PROFILES.filter(p=>!state.itemsByProfile[p.id]).map(p=>p.id);
+  if(missingProfileIds.length){
+    initializeSeededRandom(state.sessionSeed);
+    PROFILES.forEach(profile=>{
+      const generated = generateItemsForProfile(profile.id);
+      if(!state.itemsByProfile[profile.id]) state.itemsByProfile[profile.id] = generated;
+    });
+    resetRandomGenerator();
+  }
   state.items = state.itemsByProfile[state.profileId] || [];
   state.showConnectors = record.showConnectors !== undefined ? record.showConnectors : state.showConnectors;
   state.screen = 'session';
@@ -114,6 +127,10 @@ function tryResumeExamSession(email){
   // scoring or trace data.
   Object.values(state.itemsByProfile).forEach(items=>{
     items.forEach(item=>{
+      // Older saved sessions predate the Program Item envelope. Rehydrate
+      // them as single legacy-expression programs without invalidating the
+      // student's existing expression state or score.
+      ensureProgramEnvelope(item);
       item._bindings = null;
       item._feedbackAnimated = false;
       if(item.trace) item.trace.forEach(t=>{ t._flashed = false; t._entered = false; });

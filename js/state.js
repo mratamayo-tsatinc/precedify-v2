@@ -51,7 +51,7 @@ function generateItemsForProfile(profileId) {
   for(let i = 0; i < profile.itemCount; i++) {
     const inst = generateInstance(profile);
     const flat0 = flattenInstance(inst.tree);
-    items.push({
+    const item = {
       profileId: profile.id, // which profile generated this item — scoreItem()/handleCheck() use this to look up that profile's own pointsPerItem, rather than a single global point budget shared by every profile
       originalTree: inst.tree,
       originalFlat: flat0,
@@ -72,7 +72,9 @@ function generateItemsForProfile(profileId) {
       showSolution: false,
       playback: null,
       _bindings: null // lazily built by var-final-state.js (ensureBindings)
-    });
+    };
+    buildGeneratedProgram(item, profile);
+    items.push(item);
   }
   return items;
 }
@@ -118,39 +120,60 @@ function itemFullyResolved(item){
   return item.workingFlat.operands.length===1 && isFlatOperandReady(item.workingFlat.operands[0]);
 }
 
-// action is {type:'substitute', id} or {type:'evaluate', leftId, rightId}.
+// action is {type:'substitute', id}, {type:'evaluate', leftId, rightId}, or
+// the assignment plugin's {type:'reveal-assignment-target'} command.
 // Any ready operator anywhere in the expression (not just a single
 // "correct next" one) can be clicked — see the FLAT model comment above.
 function handleTokenClick(action){
   const item = currentItem();
-  if(item.checked) return;
+  const applyAction = ()=>{
+    const result = dispatchProgramAction(item, action, {applyExpressionAction});
+    if(result.applied) render();
+    return !!result.applied;
+  };
+
+  // When the optional memory animation is enabled, substitution is a
+  // two-phase UI action: first render the new timeline row with a waiting
+  // value card, then carry the stored value into it. Returning true means the
+  // animation module accepted responsibility for applying the action.
+  if(action && (action.type==='substitute'||action.type==='reveal-assignment-target')
+    && typeof animateVarFinalMemoryToExpression==='function'
+    && animateVarFinalMemoryToExpression(item,action,applyAction)) return;
+
+  applyAction();
+}
+
+// Existing expression semantics, extracted behind the statement-plugin
+// boundary. Returning a boolean lets Program Core decide whether a render is
+// needed; every state transition below is otherwise byte-for-byte equivalent
+// to the former handleTokenClick flow.
+function applyExpressionAction(item, action){
+  if(!item || item.checked) return false;
 
   if(action.type==='substitute'){
     const node = findFlatOperandById(item.workingFlat, action.id);
-    if(!node) return;
+    if(!node) return false;
     if(node.kind==='unary'){
       // First half only: reveal the wrapped variable's value. The operator
       // itself is applied by a separate 'apply-unary' click below — a
       // unary operator always acts on a variable, so its value must be
       // identified/substituted before the operator can be applied, exactly
       // like any other variable operand.
-      if(node.substituted) return;
+      if(node.substituted) return false;
       const before = flatToString(item.workingFlat);
       item.workingFlat = substituteFlatById(item.workingFlat, action.id);
       const after = flatToString(item.workingFlat);
       item.trace.push({action:'SUBSTITUTE', target:(node.inner.kind==='literal'?String(node.inner.value):node.inner.name), targetKind:node.inner.kind, sourceValue:unaryBaseValue(node), expressionBefore:before, expressionAfter:after, resultNodeId:node.id});
       item.history.push(deepCloneFlat(item.workingFlat));
-      render();
-      return;
+      return true;
     }
-    if(node.resolved) return;
+    if(node.resolved) return false;
     const before = flatToString(item.workingFlat);
     item.workingFlat = resolveFlatById(item.workingFlat, action.id);
     const after = flatToString(item.workingFlat);
     item.trace.push({action:'SUBSTITUTE', target:node.name, targetKind:node.kind, sourceValue:node.declaredValue, expressionBefore:before, expressionAfter:after, resultNodeId:node.id});
     item.history.push(deepCloneFlat(item.workingFlat));
-    render();
-    return;
+    return true;
   }
 
   if(action.type==='apply-unary'){
@@ -158,41 +181,45 @@ function handleTokenClick(action){
     // (++/--/!) to the value revealed by the preceding 'substitute' click
     // (e.g. "++7" -> "8"). Only reachable once substituted, never resolved.
     const node = findFlatOperandById(item.workingFlat, action.id);
-    if(!node || node.kind!=='unary' || !node.substituted || node.resolved) return;
+    if(!node || node.kind!=='unary' || !node.substituted || node.resolved) return false;
     const before = flatToString(item.workingFlat);
     item.workingFlat = resolveFlatById(item.workingFlat, action.id);
     const after = flatToString(item.workingFlat);
     item.trace.push({action:'UNARY', op:node.op, form:node.form, target:(node.inner.kind==='literal'?String(node.inner.value):node.inner.name), sourceValue:unaryBaseValue(node), result:unaryComputedValue(node), expressionBefore:before, expressionAfter:after, resultNodeId:node.id});
     item.history.push(deepCloneFlat(item.workingFlat));
-    render();
-    return;
+    return true;
   }
 
   if(action.type==='evaluate'){
     const unresolvedAny = collectUnresolvedFlat(item.workingFlat,[]).length>0;
-    if(unresolvedAny) return; // gated: all variables/constants must resolve first
+    if(unresolvedAny) return false; // gated: all variables/constants must resolve first
     const before = flatToString(item.workingFlat);
     const maxCands = getMaxPrecCandidatesFlat(item.workingFlat);
     const wasCorrect = maxCands.some(c=>c.leftId===action.leftId && c.rightId===action.rightId);
     const evalResult = evaluateFlatAt(item.workingFlat, action.leftId, action.rightId);
-    if(!evalResult.applied) return;
+    if(!evalResult.applied) return false;
     item.workingFlat = evalResult.newFlat;
     const after = flatToString(item.workingFlat);
     item.trace.push({action:'EVALUATE', target:{operator:evalResult.op, operands:[evalResult.a, evalResult.b]}, result:evalResult.result, expressionBefore:before, expressionAfter:after, wasCorrect, resultNodeId:evalResult.resultId, leftId:action.leftId, rightId:action.rightId});
     item.history.push(deepCloneFlat(item.workingFlat));
-    render();
+    return true;
   }
+  return false;
 }
 
 function handleUndo(){
-  // Undo is unlimited in BOTH Practice and Exam mode (it's a pre-submission
-  // editing action, not a graded attempt) — only blocked once checked.
   const item = currentItem();
-  if(item.checked || item.history.length<=1) return;
+  const result = undoProgramAction(item, {undoExpressionAction});
+  if(result.applied) render();
+}
+
+// Original expression-local undo behavior used by the compatibility plugin.
+function undoExpressionAction(item){
+  if(!item || item.checked || item.history.length<=1) return false;
   item.history.pop();
   item.trace.pop();
   item.workingFlat = deepCloneFlat(item.history[item.history.length-1]);
-  render();
+  return true;
 }
 function handleReset(){
   // Reset (start this item completely over) is Practice-only; Exam mode
@@ -200,11 +227,19 @@ function handleReset(){
   // Practice/Exam difference besides the one-check-per-item rule below.
   const item = currentItem();
   if(state.mode==='exam' || item.checked) return;
+  const result = resetProgramAction(item, {resetExpressionAction});
+  if(result.applied) render();
+}
+
+// Original Practice-mode reset used by the legacy-expression adapter.
+function resetExpressionAction(item){
+  if(!item || item.checked) return false;
+  const changed = item.trace.length>0;
   item.workingFlat = deepCloneFlat(item.originalFlat);
   item.history = [deepCloneFlat(item.originalFlat)];
   item.trace = [];
   item._bindings = null;
-  render();
+  return changed;
 }
 // ============================================================================
 // SCORING CONFIGURATION (data-driven — Project Brief §14E)
@@ -327,13 +362,34 @@ function scoreItem(facts, pointsPerItem){
 }
 
 function handleCheck(){
-  const item = currentItem();
-  if(!itemFullyResolved(item) || item.checked) return;
+  const result = checkProgramItem(currentItem(), {checkExpressionItem});
+  if(result.applied) render();
+}
+
+// Scoring for the legacy expression statement is unchanged; it is now a
+// service invoked by that statement's plugin rather than by the DOM handler.
+function checkExpressionItem(item){
+  if(!item || !itemFullyResolved(item) || item.checked) return false;
   const studentFinal = flatOperandValue(item.workingFlat.operands[0]);
   const evalSteps = item.trace.filter(t=>t.action==='EVALUATE');
   const correctSteps = evalSteps.filter(s=>s.wasCorrect).length;
   const totalOpSteps = evalSteps.length;
   const wasCorrectFinal = studentFinal === item.correctFinalValue;
+
+  // Interactive declarations add their initializer evaluations and explicit
+  // assignment commits as scorable checks. Current one-expression profiles
+  // have no declaration statements, so their scoring inputs remain identical.
+  let priorCorrectChecks = 0;
+  let priorTotalChecks = 0;
+  if(item.program && item.program.scoreAssignments){
+    item.program.statements.forEach(statement=>{
+      if(!['declaration','assignment'].includes(statement.kind) || !statement.runtime || !statement.runtime.checked) return;
+      priorCorrectChecks += statement.runtime.correctSteps;
+      priorTotalChecks += statement.runtime.totalOpSteps;
+      priorTotalChecks += 1; // the declaration's explicit `=` assignment
+      if(statement.runtime.wasCorrectAssignment) priorCorrectChecks += 1;
+    });
+  }
   item.checked = true;
   item.studentFinal = studentFinal;
   item.correctSteps = correctSteps;
@@ -347,13 +403,27 @@ function handleCheck(){
   // the actually-correct, unambiguous source now that pointsPerItem is
   // per-profile data.
   const itemProfile = PROFILES.find(p=>p.id===item.profileId) || currentProfile();
-  const {points, maxPoints} = scoreItem({correctSteps, totalOpSteps, wasCorrectFinal}, itemProfile.pointsPerItem);
+  const scoringFacts = {
+    correctSteps:correctSteps + priorCorrectChecks,
+    totalOpSteps:totalOpSteps + priorTotalChecks,
+    wasCorrectFinal
+  };
+  const {points, maxPoints} = scoreItem(scoringFacts, itemProfile.pointsPerItem);
   item.points = points;
   item.maxPoints = maxPoints;
+  item.programScoreFacts = {
+    programCorrectChecks:priorCorrectChecks,
+    programTotalChecks:priorTotalChecks,
+    declarationCorrectChecks:priorCorrectChecks,
+    declarationTotalChecks:priorTotalChecks,
+    expressionCorrectSteps:correctSteps,
+    expressionTotalSteps:totalOpSteps,
+    finalCorrect:wasCorrectFinal
+  };
   // Ratio form is retained only for the per-item "% item score" stat shown
   // in the mid-session feedback card; the session summary uses raw points.
   item.itemScore = maxPoints>0 ? points/maxPoints : 0;
-  render();
+  return true;
 }
 
 function handleRetrySameItem(){
@@ -371,6 +441,10 @@ function handleRetrySameItem(){
   item.playback = null;
   item._feedbackAnimated = false;
   item._bindings = null;
+  item.programScoreFacts = null;
+  if(itemHasInteractiveProgram(item)){
+    resetProgramAction(item, {resetExpressionAction});
+  }
   render();
 }
 

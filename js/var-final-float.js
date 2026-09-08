@@ -87,6 +87,7 @@ let floatPos = null;
 let dragging = false;
 let dragPanelEl = null;
 let dragOffsetX = 0, dragOffsetY = 0;
+let memoryTransferInProgress = false;
 
 // Whether the panel was already showing as of the LAST render — used to
 // tell "just appeared" (toggled on, or first render of the session) apart
@@ -122,6 +123,120 @@ function toggleVarFinalFlyAnim(){
   // by render() — without this the click would silently do nothing until
   // some unrelated render happened to fire.
   render();
+}
+
+// Reverse direction of the same memory visualization. The semantic action is
+// applied first so its history row and connector can render immediately; the
+// newly rendered value card is then blanked and given a spinner before the
+// browser paints. The stored value flies into that waiting card and is only
+// revealed when it lands.
+function animateVarFinalMemoryToExpression(item, action, applyAction){
+  if(!flyAnimEnabled || !floatVisible || !item || !action
+    || (action.type!=='substitute'&&action.type!=='reveal-assignment-target')) return false;
+  if(memoryTransferInProgress) return true;
+
+  const statement = typeof currentProgramStatement==='function' ? currentProgramStatement(item) : null;
+  const runtime = statement && statement.kind!=='legacy-expression' ? statement.runtime : item;
+  let named,tokenId;
+  if(action.type==='reveal-assignment-target'){
+    if(!statement || statement.kind!=='assignment' || !isCompoundAssignment(statement)
+      || runtime.targetRevealed) return false;
+    named={name:statement.target,kind:'variable'};
+    tokenId=assignmentTargetTokenId(statement);
+  } else {
+    const node = runtime && runtime.workingFlat ? findFlatOperandById(runtime.workingFlat,action.id) : null;
+    if(!node || node.resolved) return false;
+    named = node.kind==='unary' ? node.inner : node;
+    if(!named || (named.kind!=='variable' && named.kind!=='constant')) return false;
+    tokenId=action.id;
+  }
+
+  const source = document.querySelector('.var-final-float [data-token-id="vff-'+named.name+'"]');
+  const scope = statement && statement.kind!=='legacy-expression'
+    ? '[data-statement-id="'+statement.id+'"].program-expression-panel'
+    : '.eval-panel';
+  const destinations = document.querySelectorAll(scope+' [data-token-id="'+tokenId+'"]');
+  const destination = destinations.length ? destinations[destinations.length-1] : null;
+  if(!source || !destination) return false;
+
+  memoryTransferInProgress = true;
+  const shield = h('div',{class:'var-final-transfer-shield','aria-hidden':'true'});
+  const clone = source.cloneNode(true);
+  clone.removeAttribute('data-token-id');
+  clone.classList.add('var-final-flying','var-final-flying-reverse');
+  const sourceRect = source.getBoundingClientRect();
+  const sourceValueEl = source.querySelector('.tok-card-body');
+  const sourceValue = sourceValueEl ? sourceValueEl.textContent : '';
+  clone.style.position = 'fixed';
+  clone.style.left = sourceRect.left+'px';
+  clone.style.top = sourceRect.top+'px';
+  clone.style.width = sourceRect.width+'px';
+  clone.style.margin = '0';
+  clone.style.transform = 'none';
+  document.body.appendChild(shield);
+  document.body.appendChild(clone);
+  void clone.getBoundingClientRect();
+
+  // render() runs synchronously inside this callback. Consequently the next
+  // statements execute before a paint, preventing the resolved value from
+  // flashing briefly before it is replaced by the waiting spinner.
+  const applied = typeof applyAction==='function' && applyAction();
+  if(!applied){
+    clone.remove();
+    shield.remove();
+    memoryTransferInProgress = false;
+    return true;
+  }
+
+  const renderedDestinations = document.querySelectorAll(scope+' [data-token-id="'+tokenId+'"]');
+  const renderedDestination = renderedDestinations.length
+    ? renderedDestinations[renderedDestinations.length-1] : null;
+  const waitingBody = renderedDestination && renderedDestination.querySelector('.tok-card-body');
+  if(!renderedDestination || !waitingBody){
+    clone.remove();
+    shield.remove();
+    memoryTransferInProgress = false;
+    return true;
+  }
+  renderedDestination.classList.remove('tok-card-flash');
+  renderedDestination.classList.add('memory-transfer-waiting');
+  renderedDestination.setAttribute('aria-busy','true');
+  waitingBody.textContent = '';
+  waitingBody.appendChild(h('span',{class:'memory-transfer-spinner','aria-hidden':'true'}));
+  const destinationRect = renderedDestination.getBoundingClientRect();
+
+  const durationMs = flightDurationMs;
+
+  let finished = false;
+  const finish = ()=>{
+    if(finished) return;
+    finished = true;
+    clone.remove();
+    shield.remove();
+    memoryTransferInProgress = false;
+    if(renderedDestination.isConnected){
+      waitingBody.textContent = sourceValue;
+      renderedDestination.classList.remove('memory-transfer-waiting');
+      renderedDestination.removeAttribute('aria-busy');
+      renderedDestination.classList.add('tok-card-flash');
+    }
+    // Reconcile the temporary waiting DOM with the semantic history. If this
+    // substitution completed the final expression, this render also starts
+    // its now-unblocked expression-to-memory target flight.
+    if(typeof render==='function') requestAnimationFrame(()=>render());
+  };
+  clone.addEventListener('transitionend',finish,{once:true});
+  setTimeout(finish,durationMs+150);
+  requestAnimationFrame(()=>{
+    clone.style.transition =
+      `left ${durationMs}ms cubic-bezier(.22,.72,.22,1), top ${durationMs}ms cubic-bezier(.22,.72,.22,1), `+
+      `width ${durationMs}ms ease, opacity ${durationMs}ms ease`;
+    clone.style.left = destinationRect.left+'px';
+    clone.style.top = destinationRect.top+'px';
+    clone.style.width = Math.max(destinationRect.width,28)+'px';
+    clone.style.opacity = '0.72';
+  });
+  return true;
 }
 function syncVarFinalFloatToggleUI(){
   const vBtn = document.getElementById('varFloatToggle');
@@ -180,7 +295,8 @@ function buildAnimatedVarFinalSection(item){
   if(bindings.length===0) return null;
 
   const wrap = h('div',{class:'var-final-panel'});
-  wrap.appendChild(h('div',{class:'var-final-title'},'Variable final state'));
+  wrap.appendChild(h('div',{class:'var-final-title'},
+    itemHasInteractiveProgram(item) ? 'Program variables and constants' : 'Variable final state'));
   const list = h('div',{class:'var-final-list'});
   const flights = [];
 
@@ -192,20 +308,27 @@ function buildAnimatedVarFinalSection(item){
     // renderVariableFinalState call above) will correctly see this binding
     // as already-flashed if the toggle is flipped afterward, and vice
     // versa — both paths share one flag.
-    const justCommitted = live.committed && !b._flashed;
+    // The last inbound substitution may also complete the final expression.
+    // Keep that target pending until the inbound flight lands, then let the
+    // follow-up render begin the outbound final-value flight.
+    const postponeTargetFlight = memoryTransferInProgress && b.kind==='target';
+    const justCommitted = live.committed && !b._flashed && !postponeTargetFlight;
     if(justCommitted) b._flashed = true;
 
     let hasValue, displayValue, flashColor;
-    if(justCommitted){
+    if(justCommitted || (postponeTargetFlight && live.committed)){
       // Pre-commit display — mirrors resolveBindingLive's own "not yet
       // committed" branches (declared value for a variable, "—" for a
       // still-unassigned target), since the flight itself is what's
       // responsible for carrying the value in.
-      if(b.kind==='target'){ hasValue = false; displayValue = null; }
-      else { hasValue = true; displayValue = b.declaredValue; }
+      if(b.kind==='target' || b.trigger==='program-assignment'){
+        hasValue = b.trigger==='program-assignment' && b._lastDisplayValue!==undefined;
+        displayValue = hasValue ? b._lastDisplayValue : null;
+      } else { hasValue = true; displayValue = b.declaredValue; }
       flashColor = null;
     } else {
       hasValue = live.hasValue; displayValue = live.displayValue; flashColor = live.flashColor;
+      if(live.hasValue) b._lastDisplayValue=live.displayValue;
     }
 
     const row = h('div',{class:'var-final-row'+(b.trigger!=='static' && live.committed ? ' var-final-changed':'')});
@@ -213,7 +336,7 @@ function buildAnimatedVarFinalSection(item){
       id: 'vff-'+b.name,
       name: b.name,
       value: hasValue ? displayValue : '—',
-      kind: 'variable',
+      kind: b.kind==='program-constant' ? 'constant' : 'variable',
       color: flashColor,
       isFlash: false
     });
@@ -236,10 +359,30 @@ function buildAnimatedVarFinalSection(item){
       // resultNodeId is the same id findConnectorDestEl would look up for
       // that step — see var-final-state.js's own resolveBindingLive comment
       // on why "the last step's index IS the origin" for a target.
-      const originId = b.kind==='target'
-        ? (item.trace.length ? item.trace[item.trace.length-1].resultNodeId : null)
-        : b.unaryNodeId;
-      flights.push({ originId, cardEl: card, name: b.name, value: live.displayValue, color: live.flashColor });
+      let originId;
+      let mergeRuntime=null;
+      if(b.trigger==='program-assignment'){
+        const statementId=live.originStatementId||b.statementId;
+        const statement = item.program.statements.find(s=>s.id===statementId);
+        const flat = statement && statement.runtime && statement.runtime.workingFlat;
+        mergeRuntime=statement && statement.kind==='assignment' && statement.runtime.assignmentMergePending
+          ? statement.runtime : null;
+        originId = mergeRuntime && mergeRuntime.assignmentResultNodeId
+          ? mergeRuntime.assignmentResultNodeId
+          : (flat && flat.operands.length ? flat.operands[0].id : null);
+      } else {
+        originId = b.kind==='target'
+          ? (item.trace.length ? item.trace[item.trace.length-1].resultNodeId : null)
+          : b.unaryNodeId;
+      }
+      flights.push({originId, statementId:live.originStatementId||b.statementId||null, cardEl:card,binding:b,
+        name:b.name, kind:b.kind==='program-constant'?'constant':'variable',
+        value:live.displayValue, color:live.flashColor,
+        // Compound calculation timing is deliberately fixed and independent
+        // from flightDurationMs. The speed selector controls only the later
+        // expression-to-memory travel, never the instructional merge itself.
+        delayMs:mergeRuntime&&typeof COMPOUND_WRITEBACK_DELAY_MS==='number'
+          ? COMPOUND_WRITEBACK_DELAY_MS : (mergeRuntime?2400:0),mergeRuntime});
     }
   });
 
@@ -252,13 +395,16 @@ function buildAnimatedVarFinalSection(item){
 // ----------------------------------------------------------------------------
 function mountVarFinalFloatPanel(sectionEl, flights, playEntrance){
   const panel = h('div',{class:'var-final-float'+(playEntrance?' var-final-float-enter':''), style: floatPositionStyle()});
+  const activeItem = typeof currentItem==='function' ? currentItem() : null;
+  const title = itemHasInteractiveProgram(activeItem)
+    ? 'Program variables and constants' : 'Variable final state';
 
   const flyTitle = flyAnimEnabled
     ? 'Turn off fly-in animation (values will appear instantly, matching the existing pulse)'
     : 'Turn on fly-in animation for variable value updates';
   const header = h('div',{class:'var-final-float-header', onmousedown: onVarFinalFloatDragStart, ontouchstart: onVarFinalFloatDragStart},
     h('i',{class:'fa-solid fa-up-down-left-right var-final-float-drag-icon', 'aria-hidden':'true'}),
-    h('span',{class:'var-final-float-title-label'}, 'Variable final state'),
+    h('span',{class:'var-final-float-title-label'}, title),
     h('button',{class:'var-final-float-fly-toggle'+(flyAnimEnabled?' active':''), title:flyTitle, 'aria-label':flyTitle, 'aria-pressed':String(flyAnimEnabled),
       onclick: (e)=>{ e.stopPropagation(); toggleVarFinalFlyAnim(); }
     }, h('i',{class:'fa-solid fa-wand-magic-sparkles','aria-hidden':'true'})),
@@ -427,8 +573,13 @@ function renderVarFinalSpeedToggle(){
 // ----------------------------------------------------------------------------
 function runVarFinalFlights(flights){
   flights.forEach(f=>{
+    if(f.delayMs){
+      const delayed=Object.assign({},f,{delayMs:0});
+      setTimeout(()=>runVarFinalFlights([delayed]),f.delayMs);
+      return;
+    }
     const destRect = f.cardEl.getBoundingClientRect();
-    const originEl = findVarFinalOriginEl(f.originId);
+    const originEl = findVarFinalOriginEl(f.originId, f.statementId);
     if(!originEl){
       // No traceable origin (e.g. a static binding, which was always known
       // from the source rather than "produced" anywhere in the timeline) —
@@ -448,14 +599,17 @@ function runVarFinalFlights(flights){
 // Several historical rows can share that id (a value keeps rendering in
 // every later row once resolved), so the LAST match in document order is
 // the current/most-recent on-screen instance of that token.
-function findVarFinalOriginEl(id){
+function findVarFinalOriginEl(id, statementId){
   if(id==null) return null;
-  const matches = document.querySelectorAll('.eval-panel [data-token-id="'+id+'"]');
+  const scope = statementId
+    ? '.program-expression-panel[data-statement-id="'+statementId+'"]'
+    : '.eval-panel';
+  const matches = document.querySelectorAll(scope+' [data-token-id="'+id+'"]');
   return matches.length ? matches[matches.length-1] : null;
 }
 
 function spawnVarFinalFlyingToken(f, originRect, destRect){
-  const clone = renderValueCard({id:null, name:f.name, value:f.value, kind:'variable', color:f.color, isFlash:false});
+  const clone = renderValueCard({id:null, name:f.name, value:f.value, kind:f.kind || 'variable', color:f.color, isFlash:false});
   clone.classList.add('var-final-flying');
   clone.style.position = 'fixed';
   clone.style.left = originRect.left+'px';
@@ -502,6 +656,8 @@ function settleVarFinalFlight(f, color){
   if(bodyEl) bodyEl.textContent = formatValue(f.value);
   if(color){ f.cardEl.style.borderColor = color; f.cardEl.style.color = color; }
   f.cardEl.classList.add('tok-card-flash');
+  if(f.binding) f.binding._lastDisplayValue=f.value;
+  if(f.mergeRuntime) f.mergeRuntime.assignmentMergePending=false;
 }
 
 // ----------------------------------------------------------------------------
@@ -576,6 +732,16 @@ function ensureVarFinalFloatStyles(){
 .var-final-float .var-final-title{ display:none; }
 @keyframes var-final-float-in{ from{ opacity:0; transform:translateY(-6px); } to{ opacity:1; transform:translateY(0); } }
 .var-final-flying{ pointer-events:none; z-index:920; box-shadow:0 6px 18px rgba(0,0,0,0.4); }
+.var-final-flying-reverse{ z-index:922; }
+.var-final-transfer-shield{ position:fixed; inset:0; z-index:910; cursor:wait; background:transparent; }
+.memory-transfer-waiting .tok-card-body{
+  min-height:1em; display:flex; align-items:center; justify-content:center;
+}
+.memory-transfer-spinner{
+  width:10px; height:10px; border:2px solid currentColor; border-right-color:transparent;
+  border-radius:50%; animation:memory-transfer-spin .65s linear infinite;
+}
+@keyframes memory-transfer-spin{ to{ transform:rotate(360deg); } }
 @media (max-width:520px){
   .var-final-float{ width:calc(100vw - 32px); }
 }

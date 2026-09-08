@@ -82,7 +82,8 @@ function findConnectorSourceEl(row, step){
   if(step.action==='EVALUATE'){
     return row.querySelector(`[data-op-left="${step.leftId}"][data-op-right="${step.rightId}"]`);
   }
-  // SUBSTITUTE or UNARY: the token keeps the same node id before and after.
+  // SUBSTITUTE, UNARY or READ_TARGET: the token keeps the same id before
+  // and after, so compound targets use the standard token-to-card connector.
   return row.querySelector(`[data-token-id="${step.resultNodeId}"]`);
 }
 function findConnectorDestEl(row, step){
@@ -237,4 +238,28 @@ function drawCanonicalConnectorLines(item){
 
   panel.classList.remove('connector-measuring');
   appendConnectorSvg(panel, paths, dots);
+}
+
+// Each interactive declaration owns an independent expression trace. Draw
+// connectors inside each statement panel using the same geometry engine as
+// the legacy expression timeline; no statement semantics live here.
+function drawDeclarationConnectorLines(item){
+  const panels = document.querySelectorAll('.program-expression-panel');
+  panels.forEach(panel=>{
+    const stale = panel.querySelector('.connector-svg');
+    if(stale) stale.remove();
+  });
+  if(!state.showConnectors || !item || !item.program) return;
+  panels.forEach(panel=>{
+    const id = panel.getAttribute('data-statement-id');
+    const statement = item.program.statements.find(s=>s.id===id);
+    const trace = statement && statement.runtime ? statement.runtime.trace : [];
+    if(!trace.length) return;
+    const rows = panel.querySelectorAll('.tl-row');
+    panel.classList.add('connector-measuring');
+    void panel.offsetHeight;
+    const {paths,dots} = buildConnectorVisuals(panel.getBoundingClientRect(),rows,trace,trace.length);
+    panel.classList.remove('connector-measuring');
+    appendConnectorSvg(panel,paths,dots);
+  });
 }
