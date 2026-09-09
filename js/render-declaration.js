@@ -22,54 +22,41 @@ function renderDeclarationEquals(statement,ready){
 function renderDeclarationStatement(ctx){
   const {container,item,program,statement,statementIndex,isActive} = ctx;
   const runtime = statement.runtime;
-  const declarations = program.statements.filter(s=>s.kind==='declaration');
-  const ordinal = declarations.indexOf(statement)+1;
-
-  if(statementIndex===0){
-    container.appendChild(h('div',{class:'session-bar'},h('div',{class:'session-meta'},
-      h('b',{},`Item ${state.itemIndex+1}`),` / ${state.items.length}  ·  ${currentProfile().name}`)));
-    container.appendChild(h('div',{class:'program-progress'},
-      `Program statement ${Math.min(program.cursor+1,program.statements.length)} of ${program.statements.length}`));
-  }
+  const expanded=statement.status==='complete'&&!!(statement._uiExpanded||statement._uiJustCompleted);
 
   const card = h('section',{class:`program-statement declaration-statement ${statement.status}`,
     'data-statement-id':statement.id});
-  card.appendChild(h('div',{class:'program-statement-heading'},
-    h('span',{},`Declaration ${ordinal} of ${declarations.length}`),
-    h('span',{class:'program-statement-status'},
-      statement.status==='complete'?'Assigned':(isActive?'Current':'Locked'))));
-
-  if(statement.status==='locked'){
-    card.appendChild(h('div',{class:'declaration-locked-line'},
-      h('i',{class:'fa-solid fa-lock','aria-hidden':'true'}),' ',
-      `${declarationKeyword(statement)} ${statement.binding.name} = ${renderString(runtime.originalTree)};`));
+  if(!isActive&&!expanded){
+    card.appendChild(renderProgramStatementSummary(statement,statementIndex,
+      programStatementSource(statement,item)));
     container.appendChild(card);
     return;
   }
+  card.classList.add('expanded');
 
   const labelText = `${declarationKeyword(statement)} ${statement.binding.name}`;
-  card.appendChild(renderExpressionSourcePanel('Original statement',[
-    `${labelText} = ${renderString(runtime.originalTree)};`
-  ],'program-source-panel'));
   card.appendChild(renderExpressionEvaluationPanel({
     runtime,
     labelText,
     labelCh:labelText.length+1,
-    title:'Initializer evaluation',
+    title:null,
     panelClass:'declaration-eval-panel program-expression-panel',
     statementId:statement.id,
+    statementNumber:statementIndex+1,
+    continuationStyle:true,
     interactive:isActive && !runtime.checked,
     revealCorrectness:runtime.checked,
     isFullyResolved:()=>declarationInitializerResolved(statement),
     renderEquals:ready=>renderDeclarationEquals(statement,ready),
     renderTrailingActions:()=>isActive
-      ? renderInlineEvaluationActions({canUndo:canUndoProgram(item)}) : null
+      ? renderInlineEvaluationActions({canUndo:canUndoProgram(item)})
+      : renderCollapseStatementAction(statement,statementIndex)
   }));
 
   if(isActive){
     const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
     const ready = declarationInitializerResolved(statement);
-    card.appendChild(h('p',{class:'helper-text'},unresolved
+    card.appendChild(renderContextHelp(unresolved
       ? 'Substitute the initialized value from program memory before evaluating this initializer.'
       : (ready ? `The initializer is resolved. Click = to assign it to ${statement.binding.name}.`
         : 'Evaluate the highlighted operator.')));

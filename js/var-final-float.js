@@ -345,10 +345,7 @@ function buildAnimatedVarFinalSection(item){
     row.appendChild(card);
 
     const fullTag = bindingTagText(b, live);
-    row.appendChild(h('span',{class:'vf-tag'+(b.trigger==='static'?' vf-unchanged':''), tabindex:'0', title:fullTag, 'aria-label':fullTag},
-      bindingTagShort(b, live),
-      h('i',{class:'fa-solid fa-circle-info vf-hint-icon', 'aria-hidden':'true'})
-    ));
+    row.appendChild(renderBindingInfoTrigger(fullTag,b.trigger==='static'));
     list.appendChild(row);
 
     if(justCommitted){

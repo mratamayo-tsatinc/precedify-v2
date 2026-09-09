@@ -132,15 +132,21 @@ function handleTokenClick(action){
     return !!result.applied;
   };
 
-  // When the optional memory animation is enabled, substitution is a
-  // two-phase UI action: first render the new timeline row with a waiting
-  // value card, then carry the stored value into it. Returning true means the
-  // animation module accepted responsibility for applying the action.
-  if(action && (action.type==='substitute'||action.type==='reveal-assignment-target')
-    && typeof animateVarFinalMemoryToExpression==='function'
-    && animateVarFinalMemoryToExpression(item,action,applyAction)) return;
+  const commitAction = ()=>{
+    // When the optional memory animation is enabled, substitution remains a
+    // two-phase action. It now starts only after the empty stage is on-screen.
+    if(action && (action.type==='substitute'||action.type==='reveal-assignment-target')
+      && typeof animateVarFinalMemoryToExpression==='function'
+      && animateVarFinalMemoryToExpression(item,action,applyAction)) return;
+    applyAction();
+  };
 
-  applyAction();
+  // Every visible evaluation step first reserves and scrolls to an empty
+  // stage. With animations disabled the same ordering is preserved; only the
+  // subsequent value flight/merge is skipped by its existing feature toggle.
+  if(typeof prepareLiveStepStage==='function'
+    && prepareLiveStepStage(item,action,commitAction)) return;
+  commitAction();
 }
 
 // Existing expression semantics, extracted behind the statement-plugin

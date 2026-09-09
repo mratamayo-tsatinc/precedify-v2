@@ -89,7 +89,13 @@ function statementPluginFor(statement){
 
 function advanceProgram(program){
   const current = program.statements[program.cursor];
-  if(current) current.status = 'complete';
+  if(current){
+    current.status = 'complete';
+    // Keep the completed derivation visible long enough for its result and
+    // memory handoff to be perceived. The next valid statement action clears
+    // this transient presentation flag.
+    current._uiJustCompleted = true;
+  }
   if(program.cursor < program.statements.length-1){
     program.cursor++;
     program.statements[program.cursor].status = 'active';
@@ -106,6 +112,11 @@ function dispatchProgramAction(item, action, services){
   const plugin = statementPluginFor(statement);
   if(!plugin || typeof plugin.applyAction !== 'function') return {applied:false, reason:'unsupported-statement'};
   const result = plugin.applyAction({program, statement, item, action, services:services||{}}) || {applied:false};
+  if(result.applied){
+    program.statements.forEach(candidate=>{
+      if(candidate!==statement) candidate._uiJustCompleted=false;
+    });
+  }
   if(result.event) program.events.push(result.event);
   if(Array.isArray(result.events)) program.events.push(...result.events);
   if(result.completed) advanceProgram(program);
@@ -166,6 +177,8 @@ function resetProgramAction(item, services){
       changed = changed || !!result.applied;
     }
     statement.status = index===0 ? 'active' : 'locked';
+    statement._uiJustCompleted = false;
+    statement._uiExpanded = false;
   });
   program.cursor = 0;
   program.status = 'running';
@@ -177,11 +190,19 @@ function resetProgramAction(item, services){
 function renderProgramItem(container, item, services){
   const program = ensureProgramEnvelope(item);
   if(!program) return;
+  // Interactive multi-statement items render inside one shared visual flow.
+  // The optional presentation hook is defined by render-session.js; keeping
+  // it optional preserves Program Core's DOM-agnostic testability and the
+  // exact one-statement legacy fallback.
+  const statementContainer = itemHasInteractiveProgram(item)
+    && typeof renderProgramWorkspaceShell==='function'
+      ? renderProgramWorkspaceShell(container,item,program)
+      : container;
   program.statements.forEach((statement, index)=>{
     const renderer = statementRendererRegistry.get(statement.kind);
     if(typeof renderer !== 'function') throw new Error(`No renderer registered for statement kind '${statement.kind}'`);
     renderer({
-      container, item, program, statement, statementIndex:index,
+      container:statementContainer, item, program, statement, statementIndex:index,
       isActive:index===program.cursor && program.status!=='complete',
       services:services||{}
     });

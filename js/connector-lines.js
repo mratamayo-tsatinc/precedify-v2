@@ -173,6 +173,18 @@ function appendConnectorSvg(panel, paths, dots){
   panel.appendChild(svg);
 }
 
+// Measure in the panel's scroll-content coordinate space. Rows and SVG then
+// move together under horizontal scrolling, so scrolling itself needs no
+// connector redraw; only a genuine layout change does.
+function connectorContentRect(panel){
+  const rect=panel.getBoundingClientRect();
+  return {
+    left:rect.left-(panel.scrollLeft||0),
+    top:rect.top-(panel.scrollTop||0),
+    right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height
+  };
+}
+
 // ----------------------------------------------------------------------------
 // Main session timeline (.eval-panel), driven by item.trace.
 // ----------------------------------------------------------------------------
@@ -195,7 +207,7 @@ function drawConnectorLines(item){
   panel.classList.add('connector-measuring');
   void panel.offsetHeight;
 
-  const panelRect = panel.getBoundingClientRect();
+  const panelRect = connectorContentRect(panel);
   const {paths, dots} = buildConnectorVisuals(panelRect, rows, item.trace, item.trace.length);
 
   panel.classList.remove('connector-measuring');
@@ -218,25 +230,69 @@ function drawCanonicalConnectorLines(item){
   if(!panel) return;
 
   const pb = item.playback;
-  if(pb.index<=0) return; // nothing revealed yet
+  const visibleAttr=panel.getAttribute('data-canonical-visible');
+  const visibleCount=visibleAttr==null ? pb.index : Number(visibleAttr);
+  if(visibleCount<=0) return; // nothing revealed yet
 
   const rows = panel.querySelectorAll('.tl-row');
 
   panel.classList.add('connector-measuring');
   void panel.offsetHeight;
 
-  const panelRect = panel.getBoundingClientRect();
-  const {paths, dots} = buildConnectorVisuals(panelRect, rows, item.canonicalTrace.steps, pb.index);
+  const panelRect = connectorContentRect(panel);
+  const {paths, dots} = buildConnectorVisuals(panelRect, rows,item.canonicalTrace.steps,visibleCount);
 
   panel.classList.remove('connector-measuring');
   appendConnectorSvg(panel, paths, dots);
+}
+
+// Canonical declaration/assignment timelines reuse the live expression
+// renderer, but are driven by the model trace and the program-wide playback
+// cursor. Draw their connectors from those same model steps, including the
+// final assignment write, without touching any live/student trace.
+function drawCanonicalProgramConnectorLines(item){
+  const panels=document.querySelectorAll('.canonical-program-expression-panel');
+  panels.forEach(panel=>{
+    const stale=panel.querySelector('.connector-svg');
+    if(stale) stale.remove();
+  });
+  if(!state.showConnectors||!item||!item.showSolution||!item.playback
+    ||typeof canonicalProgramSegments!=='function'||typeof canonicalStatementRuntime!=='function') return;
+  const segments=canonicalProgramSegments(item);
+  panels.forEach(panel=>{
+    const id=panel.getAttribute('data-statement-id');
+    const segment=segments.find(candidate=>candidate.kind==='statement'&&candidate.statement.id===id);
+    if(!segment||item.playback.index<=segment.start) return;
+    const localIndex=Math.min(segment.length,item.playback.index-segment.start);
+    const runtime=canonicalStatementRuntime(segment.statement,localIndex);
+    const commitVisible=localIndex>=segment.length;
+    let visualSteps=runtime.trace.slice();
+    if(commitVisible){
+      const resultNodeId=segment.statement.kind==='assignment'&&isCompoundAssignment(segment.statement)
+        ? assignmentResultTokenId(segment.statement)
+        : `canonical-assignment-result-${segment.statement.id}`;
+      visualSteps.push({action:'APPLY_ASSIGNMENT',statementId:segment.statement.id,resultNodeId});
+    }
+    if(!visualSteps.length) return;
+    const rows=panel.querySelectorAll('.tl-row');
+    panel.classList.add('connector-measuring');
+    void panel.offsetHeight;
+    const visuals=buildConnectorVisuals(connectorContentRect(panel),rows,visualSteps,visualSteps.length);
+    panel.classList.remove('connector-measuring');
+    appendConnectorSvg(panel,visuals.paths,visuals.dots);
+  });
 }
 
 // Each interactive declaration owns an independent expression trace. Draw
 // connectors inside each statement panel using the same geometry engine as
 // the legacy expression timeline; no statement semantics live here.
 function drawDeclarationConnectorLines(item){
-  const panels = document.querySelectorAll('.program-expression-panel');
+  // The final expression reuses .program-expression-panel for workspace
+  // styling, but its trace and connector lifecycle are owned by
+  // drawConnectorLines(). Excluding it here prevents this second pass from
+  // deleting the live SVG that the first pass just appended.
+  const panels = document.querySelectorAll(
+    '.program-expression-panel:not(.final-expression-panel)');
   panels.forEach(panel=>{
     const stale = panel.querySelector('.connector-svg');
     if(stale) stale.remove();
@@ -267,7 +323,7 @@ function drawDeclarationConnectorLines(item){
     panel.classList.add('connector-measuring');
     void panel.offsetHeight;
     const {paths,dots} = buildConnectorVisuals(
-      panel.getBoundingClientRect(),rows,visualSteps,visualSteps.length);
+      connectorContentRect(panel),rows,visualSteps,visualSteps.length);
     panel.classList.remove('connector-measuring');
     appendConnectorSvg(panel,paths,dots);
   });

@@ -243,18 +243,22 @@ function bindingTagText(binding, live){
     ? `${binding.name}${binding.op} applied — used ${formatValue(binding.declaredValue)} in the expression`
     : `${binding.name}${binding.op} — updates once the statement completes`;
 }
-// Compact on-screen label — the full sentence above (bindingTagText) still
-// exists in full, but only as a hover/focus tooltip (title/aria-label), the
-// same "detail lives in the tooltip, only a short badge shows inline"
-// convention already used for step correctness (see stepTooltip in
-// render-session.js). Keeps this row from wrapping across two lines per
-// card, which is what was eating horizontal/vertical space on mobile.
+// Retained as a compact-label compatibility helper for external renderers.
+// Built-in memory panels now expose the full status only through the shared
+// hover/focus/touch information trigger below.
 function bindingTagShort(binding, live){
   if(binding.kind==='program-constant') return live.committed ? 'constant · set' : 'constant · pending';
   if(binding.kind==='program-variable') return live.committed ? 'assigned' : 'pending';
   if(binding.trigger==='static') return 'unchanged';
   if(binding.kind==='target') return live.committed ? 'assigned' : 'pending';
   return live.committed ? 'applied' : 'pending';
+}
+
+function renderBindingInfoTrigger(fullTag,unchanged){
+  return h('details',{class:'vf-tag'+(unchanged?' vf-unchanged':'')},
+    h('summary',{title:fullTag,'aria-label':fullTag},
+      h('i',{class:'fa-solid fa-circle-info vf-hint-icon','aria-hidden':'true'})),
+    h('span',{class:'vf-tag-detail'},fullTag));
 }
 
 // Builds the section DOM, or returns null when there's nothing to show at
@@ -293,10 +297,7 @@ function renderVariableFinalState(item){
       isFlash
     }));
     const fullTag = bindingTagText(b, live);
-    row.appendChild(h('span',{class:'vf-tag'+(b.trigger==='static'?' vf-unchanged':''), tabindex:'0', title:fullTag, 'aria-label':fullTag},
-      bindingTagShort(b, live),
-      h('i',{class:'fa-solid fa-circle-info vf-hint-icon', 'aria-hidden':'true'})
-    ));
+    row.appendChild(renderBindingInfoTrigger(fullTag,b.trigger==='static'));
     list.appendChild(row);
   });
 

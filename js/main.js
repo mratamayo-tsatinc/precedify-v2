@@ -1,3 +1,21 @@
+function captureExpressionScrollPositions(container){
+  const positions=new Map();
+  if(!container) return positions;
+  container.querySelectorAll('.expression-scroll-surface').forEach((panel,index)=>{
+    const key=panel.getAttribute('data-statement-id')||`legacy-expression-${index}`;
+    positions.set(key,panel.scrollLeft||0);
+  });
+  return positions;
+}
+
+function restoreExpressionScrollPositions(container,positions){
+  if(!container||!positions||!positions.size) return;
+  container.querySelectorAll('.expression-scroll-surface').forEach((panel,index)=>{
+    const key=panel.getAttribute('data-statement-id')||`legacy-expression-${index}`;
+    if(positions.has(key)) panel.scrollLeft=positions.get(key);
+  });
+}
+
 function render(){
   if(activePlaybackTimer){ clearTimeout(activePlaybackTimer); activePlaybackTimer = null; }
 
@@ -27,8 +45,13 @@ function render(){
   syncGlobalHeaderUI();
 
   const container = document.getElementById('app');
+  const expressionScrollPositions=captureExpressionScrollPositions(container);
   container.innerHTML = '';
   renderProgramItem(container, currentItem());
+  // A click rebuilds #app, but the student's horizontal reading position is
+  // part of the current work context. Restore it before connector geometry is
+  // measured so rows and their shared SVG begin in the same content space.
+  restoreExpressionScrollPositions(container,expressionScrollPositions);
 
   // The feedback drawer lives outside #app and survives its rebuild. Sync it
   // at this global boundary so unchecked declaration/assignment items (which
@@ -38,9 +61,9 @@ function render(){
     syncFeedbackDrawerForItem(currentItem());
   }
 
-  // Follow only genuinely new live-work rows. This runs before the memory
-  // panel measures animation coordinates, so an enabled value flight never
-  // targets a position that moves underneath it.
+  // Fallback follower for rows created outside the click-stage coordinator
+  // (for example restored or plugin-driven progress). Ordinary student steps
+  // have already prepared their viewport and are suppressed here.
   if(typeof handleLiveStepAutoScroll === 'function') handleLiveStepAutoScroll(currentItem());
 
   // Mount at the program boundary so this authoritative panel refreshes for
@@ -66,10 +89,12 @@ function render(){
     // driven by item.canonicalTrace.steps rather than item.trace. No-op
     // when the solution isn't open or no step has been revealed yet.
     drawCanonicalConnectorLines(currentItem());
+    if(typeof drawCanonicalProgramConnectorLines==='function') drawCanonicalProgramConnectorLines(currentItem());
 
     const item = currentItem();
     if(item && item.playback && item.playback.playing){
-      const total = item.canonicalTrace.steps.length;
+      const total = typeof canonicalPlaybackTotal==='function'
+        ? canonicalPlaybackTotal(item) : item.canonicalTrace.steps.length;
       if(item.playback.index < total){
         activePlaybackTimer = setTimeout(()=>{
           item.playback.index++;

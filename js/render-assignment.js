@@ -61,7 +61,8 @@ function compoundArithmeticOperator(operator){
   return operator==='=' ? '=' : operator.slice(0,-1);
 }
 
-function appendCompoundAssignmentResult(timeline,statement){
+function appendCompoundAssignmentResult(timeline,statement,options){
+  options=options||{};
   const runtime=statement.runtime;
   if(!runtime.checked || !isCompoundAssignment(statement)) return;
   const color=stepVisualColor({action:'APPLY_ASSIGNMENT'},runtime.trace.length);
@@ -78,42 +79,38 @@ function appendCompoundAssignmentResult(timeline,statement){
   result.classList.add('compound-merge-result');
   const stage=h('span',{class:'compound-merge-stage'+(animate?' is-animating':''),
     style:`--compound-merge-duration:${COMPOUND_MERGE_DURATION_MS}ms;`},source,cue,result);
-  const row=h('div',{class:'tl-row current compound-result-row'});
-  row.appendChild(h('div',{class:'tl-dot',style:`background:${color};box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`,
+  const row=h('div',{class:`tl-row ${options.historical?'done':'current'} compound-result-row`});
+  row.appendChild(h('div',{class:'tl-dot',style:`background:${color};${options.historical?'':`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`}`,
     title:`${statement.target} now stores ${formatValue(runtime.assignedValue)}`}));
-  row.appendChild(h('div',{class:'code-out row-enter'},renderBadgeSlot(null),stage));
+  row.appendChild(h('div',{class:'code-out'+(options.historical?'':' row-enter')},renderBadgeSlot(null),stage));
   timeline.appendChild(row);
 }
 
 function renderAssignmentStatement(ctx){
   const {container,item,program,statement,statementIndex,isActive}=ctx;
   const runtime=statement.runtime;
-  const assignments=program.statements.filter(s=>s.kind==='assignment');
-  const ordinal=assignments.indexOf(statement)+1;
+  const expanded=statement.status==='complete'&&!!(statement._uiExpanded||statement._uiJustCompleted);
   const card=h('section',{class:`program-statement assignment-statement ${statement.status}`,'data-statement-id':statement.id});
-  card.appendChild(h('div',{class:'program-statement-heading'},
-    h('span',{},`Assignment ${ordinal} of ${assignments.length}`),
-    h('span',{class:'program-statement-status'},statement.status==='complete'?'Applied':(isActive?'Current':'Locked'))));
-  if(statement.status==='locked'){
-    card.appendChild(h('div',{class:'declaration-locked-line'},h('i',{class:'fa-solid fa-lock','aria-hidden':'true'}),' ',
-      `${statement.target} ${statement.operator} ${renderString(runtime.originalTree)};`));
+  if(!isActive&&!expanded){
+    card.appendChild(renderProgramStatementSummary(statement,statementIndex,
+      programStatementSource(statement,item)));
     container.appendChild(card);
     return;
   }
+  card.classList.add('expanded');
   const labelText=statement.target;
-  card.appendChild(renderExpressionSourcePanel('Original statement',[
-    `${statement.target} ${statement.operator} ${renderString(runtime.originalTree)};`
-  ],'program-source-panel'));
   const compound=isCompoundAssignment(statement);
   card.appendChild(renderExpressionEvaluationPanel({runtime,labelText,labelCh:labelText.length+1,
-    title:'Assignment value evaluation',panelClass:'assignment-eval-panel program-expression-panel',
+    title:null,panelClass:'assignment-eval-panel program-expression-panel',
     statementId:statement.id,interactive:isActive&&!runtime.checked,revealCorrectness:runtime.checked,
+    statementNumber:statementIndex+1,continuationStyle:true,
     isFullyResolved:()=>compound?assignmentReadyToApply(statement):assignmentRhsResolved(statement),
     renderEquals:ready=>renderAssignmentOperator(statement,ready),
     renderPrefix:compound?(context=>renderCompoundAssignmentPrefix(statement,context,isActive)):null,
     renderAfterRows:compound?(timeline=>appendCompoundAssignmentResult(timeline,statement)):null,
     renderTrailingActions:()=>isActive
-      ? renderInlineEvaluationActions({canUndo:canUndoProgram(item)}) : null}));
+      ? renderInlineEvaluationActions({canUndo:canUndoProgram(item)})
+      : renderCollapseStatementAction(statement,statementIndex)}));
   if(isActive){
     const unresolved=collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
     const ready=assignmentRhsResolved(statement);
@@ -122,7 +119,7 @@ function renderAssignmentStatement(ctx){
     else if(unresolved) guidance='Substitute initialized values from program memory before evaluating the assignment value.';
     else if(!ready) guidance='Evaluate the highlighted operator.';
     else guidance=`Both values are ready. Click ${statement.operator} to update ${statement.target}.`;
-    card.appendChild(h('p',{class:'helper-text'},guidance));
+    card.appendChild(renderContextHelp(guidance));
     const canReset=state.mode==='practice'&&(program.cursor>0||runtime.trace.length>0||runtime.targetRevealed);
     const resetControl=renderItemResetControl(canReset);
     if(resetControl) card.appendChild(resetControl);

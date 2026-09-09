@@ -5,10 +5,8 @@
 // left-hand side once, then just "= ..." underneath for every subsequent
 // transformation, reading straight down the "=" column rather than
 // re-parsing "int result" on every line. We mimic that here: the LHS label
-// is shown only on the very first evaluation-panel row (the untouched
-// expression) and the very last (the fully-derived final value) — see
-// callers below — with every row in between rendering a blank space of the
-// exact same width instead.
+// is shown only on the first evaluation row (the untouched source statement),
+// while every derived row reserves the same blank width.
 //
 // The LHS text is now PER-ITEM, not a fixed constant: each generated item
 // carries its own randomly (seeded) chosen assignment-target name (see
@@ -72,9 +70,9 @@ function renderItemResetControl(show){
     h('button',{class:'item-reset-button',type:'button',onclick:handleReset},'Reset item'));
 }
 
-// Shared source-code panel for every expression-shaped statement. Keeping the
-// complete statement outside the compact evaluation rows is especially
-// important on mobile, where the rows intentionally hide their LHS label.
+// Compatibility helper retained for optional plugins that need a standalone
+// source block. Built-in statements now place their authoritative source in
+// the first evaluation row and do not call this helper.
 function renderExpressionSourcePanel(title, lines, panelClass){
   const panel = h('div',{class:'source-panel'+(panelClass?' '+panelClass:'')});
   panel.appendChild(h('div',{class:'panel-title'},title));
@@ -84,6 +82,91 @@ function renderExpressionSourcePanel(title, lines, panelClass){
     panel.appendChild(h('div',{class:`code-line ${lineClass}`},value));
   });
   return panel;
+}
+
+function programStatementSource(statement,item){
+  if(statement.kind==='declaration'){
+    return `${declarationKeyword(statement)} ${statement.binding.name} = ${renderString(statement.runtime.originalTree)};`;
+  }
+  if(statement.kind==='assignment'){
+    return `${statement.target} ${statement.operator} ${renderString(statement.runtime.originalTree)};`;
+  }
+  const expression=renderString(item.originalTree);
+  return typeof assignLineString==='function'
+    ? assignLineString(expression,item.resultName)
+    : `int ${item.resultName||'result'} = ${expression};`;
+}
+
+function renderProgramWorkspaceShell(container,item,program){
+  container.appendChild(h('div',{class:'session-bar'},
+    h('div',{class:'session-meta'},h('b',{},`Item ${state.itemIndex+1}`),` / ${state.items.length}  ·  ${currentProfile().name}`)));
+  const workspace=h('section',{class:'program-workspace','aria-label':'Program execution'});
+  const progress=h('div',{class:'program-progress-visual',role:'progressbar',
+    'aria-label':`Program statement ${Math.min(program.cursor+1,program.statements.length)} of ${program.statements.length}`,
+    'aria-valuemin':'1','aria-valuemax':String(program.statements.length),
+    'aria-valuenow':String(Math.min(program.cursor+1,program.statements.length))});
+  program.statements.forEach((statement,index)=>{
+    const status=statement.status==='complete'?'complete':(index===program.cursor?'current':'waiting');
+    progress.appendChild(h('span',{class:`program-progress-dot ${status}`,
+      title:`Statement ${index+1}: ${status}`,'aria-hidden':'true'}));
+  });
+  workspace.appendChild(progress);
+  const flow=h('div',{class:'program-statement-flow'});
+  workspace.appendChild(flow);
+  container.appendChild(workspace);
+  return flow;
+}
+
+function toggleProgramStatementDetails(statement){
+  if(!statement || statement.status!=='complete') return;
+  const isOpen=!!(statement._uiExpanded||statement._uiJustCompleted);
+  statement._uiJustCompleted=false;
+  statement._uiExpanded=!isOpen;
+  render();
+}
+
+function renderProgramStatementSummary(statement,statementIndex,source){
+  const complete=statement.status==='complete';
+  const timeline=h('div',{class:'timeline program-summary-timeline'});
+  const row=h('div',{class:`tl-row program-summary-row ${complete?'done':'waiting'}`});
+  row.appendChild(h('div',{class:'tl-dot statement-source-dot',
+    title:complete?'Completed statement':'Waiting statement'},String(statementIndex+1)));
+  const statusIcon=h('i',{class:`fa-solid ${complete?'fa-circle-check':'fa-lock'} program-summary-status`,
+    title:complete?'Completed':'Waiting','aria-label':complete?'Completed statement':'Waiting statement'});
+  const action=complete?h('button',{class:'program-summary-toggle',type:'button',
+    title:'Show evaluation steps','aria-label':`Show evaluation steps for statement ${statementIndex+1}`,
+    onclick:()=>toggleProgramStatementDetails(statement)},
+    h('i',{class:'fa-solid fa-chevron-down','aria-hidden':'true'})):null;
+  row.appendChild(h('div',{class:'code-out program-summary-code'},statusIcon,
+    h('code',{},source),action));
+  timeline.appendChild(row);
+  return timeline;
+}
+
+function renderCollapseStatementAction(statement,statementIndex){
+  return h('button',{class:'inline-eval-action program-collapse-action',type:'button',
+    title:'Collapse evaluation steps','aria-label':`Collapse statement ${statementIndex+1}`,
+    onclick:()=>toggleProgramStatementDetails(statement)},
+    h('i',{class:'fa-solid fa-chevron-up','aria-hidden':'true'}));
+}
+
+// Guidance stays available without occupying the learning surface. Native
+// title handles mouse hover; details provides keyboard and touch disclosure.
+function renderContextHelp(text){
+  if(!text) return null;
+  return h('details',{class:'context-help'},
+    h('summary',{title:text,'aria-label':'Show guidance'},
+      h('i',{class:'fa-solid fa-circle-info','aria-hidden':'true'})),
+    h('div',{class:'context-help-popover'},text));
+}
+
+function renderSeededSourceDisclosure(decls){
+  if(!Array.isArray(decls)||!decls.length) return null;
+  return h('details',{class:'context-help seeded-source-help'},
+    h('summary',{title:'Show seeded declarations','aria-label':'Show seeded declarations'},
+      h('i',{class:'fa-solid fa-code','aria-hidden':'true'})),
+    h('div',{class:'context-help-popover'},...decls.map(decl=>
+      h('code',{class:'seeded-source-line'},declLine(decl,state.language)))));
 }
 
 // Full step detail as plain text only — used for a hover title / aria-label,
@@ -104,7 +187,7 @@ let activePlaybackTimer = null;
 function playbackTogglePlay(){
   const item = currentItem();
   if(!item || !item.playback) return;
-  const total = item.canonicalTrace.steps.length;
+  const total = canonicalPlaybackTotal(item);
   if(item.playback.index >= total) item.playback.index = 0;
   item.playback.playing = !item.playback.playing;
   render();
@@ -112,7 +195,7 @@ function playbackTogglePlay(){
 function playbackStep(delta){
   const item = currentItem();
   if(!item || !item.playback) return;
-  const total = item.canonicalTrace.steps.length;
+  const total = canonicalPlaybackTotal(item);
   item.playback.playing = false;
   item.playback.index = Math.max(0, Math.min(total, item.playback.index+delta));
   render();
@@ -128,6 +211,7 @@ function playbackRestart(){
 function renderSession(container){
   const item = currentItem();
   const profile = currentProfile();
+  const embeddedProgram=itemHasInteractiveProgram(item)&&item.program.statements.length>1;
 
   // This item's own assignment-target label text/width — see the header
   // comment above. Computed once per render and threaded through every
@@ -140,22 +224,22 @@ function renderSession(container){
   // Mode tag, links toggle, and exam timer are global app settings, not
   // per-profile — they now live in the static app header (index.html) and
   // are kept in sync by main.js's syncGlobalHeaderUI(), not rebuilt here.
-  container.appendChild(h('div',{class:'session-bar'},
-    h('div',{class:'session-meta'}, h('b',{}, `Item ${state.itemIndex+1}`), ` / ${state.items.length}  ·  ${profile.name}`)
-  ));
-
-  // SOURCE panel
-  const hasInteractiveDeclarations = itemHasInteractiveProgram(item);
-  const sourceLines = [];
-  if(!hasInteractiveDeclarations){
-    for(const decl of item.decls){
-      sourceLines.push({text:declLine(decl,state.language),className:'decl-line'});
-    }
+  if(!embeddedProgram){
+    container.appendChild(h('div',{class:'session-bar'},
+      h('div',{class:'session-meta'}, h('b',{}, `Item ${state.itemIndex+1}`), ` / ${state.items.length}  ·  ${profile.name}`)
+    ));
   }
-  const originalExprStr = renderString(item.originalTree);
-  sourceLines.push({text:assignLineString(originalExprStr,item.resultName),className:'active-line'});
-  container.appendChild(renderExpressionSourcePanel(
-    hasInteractiveDeclarations ? 'Final expression' : 'Original source',sourceLines));
+  const hasInteractiveDeclarations = itemHasInteractiveProgram(item);
+  let evaluationHost=container;
+  if(embeddedProgram){
+    evaluationHost=h('section',{class:'program-statement legacy-program-statement active expanded',
+      'data-statement-id':'expression'});
+    container.appendChild(evaluationHost);
+  }
+  if(!hasInteractiveDeclarations){
+    const seededSource=renderSeededSourceDisclosure(item.decls);
+    if(seededSource) evaluationHost.appendChild(seededSource);
+  }
 
   // The same renderer is used by declaration initializers; this invocation
   // preserves the legacy item as the reference behavior.
@@ -163,8 +247,11 @@ function renderSession(container){
     runtime:item,
     labelText:assignLabelText,
     labelCh:assignLabelCh,
-    title:'Evaluation',
-    panelClass:'eval-panel',
+    title:embeddedProgram?null:'Evaluation',
+    panelClass:'eval-panel'+(embeddedProgram?' program-expression-panel final-expression-panel':''),
+    statementId:embeddedProgram?'expression':null,
+    statementNumber:embeddedProgram?item.program.cursor+1:null,
+    continuationStyle:true,
     interactive:true,
     revealCorrectness:item.checked,
     isFullyResolved:()=>itemFullyResolved(item),
@@ -173,18 +260,18 @@ function renderSession(container){
       canCheck:!item.checked&&itemFullyResolved(item)
     })
   });
-  container.appendChild(evalPanel);
+  evaluationHost.appendChild(evalPanel);
   const canReset = state.mode==='practice' && !item.checked && (
     item.trace.length>0 || (item.program && item.program.cursor>0));
   const resetControl=renderItemResetControl(canReset);
-  if(resetControl) container.appendChild(resetControl);
+  if(resetControl) evaluationHost.appendChild(resetControl);
 
   if(!itemFullyResolved(item) && !item.checked){
     const unresolvedCount = collectUnresolvedFlat(item.workingFlat,[]).length;
     if(unresolvedCount>0){
-      container.appendChild(h('p',{class:'helper-text'}, `Resolve ${unresolvedCount} more highlighted token${unresolvedCount>1?'s':''} (variable, constant, or unary) before operators become active.`));
+      evaluationHost.appendChild(renderContextHelp(`Resolve ${unresolvedCount} more highlighted token${unresolvedCount>1?'s':''} (variable, constant, or unary) before operators become active.`));
     } else {
-      container.appendChild(h('p',{class:'helper-text'}, 'Tap any highlighted operator to evaluate it — you choose the order. Wrong order is allowed; you\'ll see how it plays out.'));
+      evaluationHost.appendChild(renderContextHelp('Tap any highlighted operator to evaluate it — you choose the order. Wrong order is allowed; you\'ll see how it plays out.'));
     }
   }
 
@@ -235,8 +322,9 @@ function renderSession(container){
     if(state.mode==='practice'){
       fb.appendChild(h('button',{class:'solution-toggle', onclick:toggleSolution}, item.showSolution ? 'Hide correct solution' : 'Show correct solution'));
       if(item.showSolution){
-        if(hasInteractiveDeclarations) fb.appendChild(renderCanonicalDeclarationPrelude(item));
-        fb.appendChild(renderCanonicalPlayback(item, assignLabelText, assignLabelCh));
+        fb.appendChild(hasInteractiveDeclarations
+          ? renderCanonicalProgramPlayback(item, assignLabelText, assignLabelCh)
+          : renderCanonicalPlayback(item, assignLabelText, assignLabelCh));
       }
     }
     // Feedback now lives in the toggleable feedback drawer (feedback-drawer.js)
@@ -311,25 +399,32 @@ function renderSession(container){
 // from this same item's item.resultName) rather than recomputed here, so
 // the canonical-playback panel's "=" column lines up with exactly the same
 // reserved width the live session panel above it used for this item.
-function renderCanonicalPlayback(item, assignLabelText, assignLabelCh){
-  const pb = item.playback;
-  const total = item.canonicalTrace.steps.length;
-
-  const wrap = h('div',{class:'solution-playback'});
-  wrap.appendChild(h('div',{class:'playback-controls'},
-    h('button',{class:'btn playback-btn', disabled: pb.index<=0, onclick:()=>playbackStep(-1)}, h('i',{class:'fa-solid fa-backward-step'}), ' Prev'),
+function renderPlaybackControls(item,total){
+  const pb=item.playback;
+  return h('div',{class:'playback-controls'},
+    h('button',{class:'btn playback-btn', disabled:pb.index<=0, onclick:()=>playbackStep(-1)}, h('i',{class:'fa-solid fa-backward-step'}), ' Prev'),
     h('button',{class:'btn btn-primary playback-btn', onclick:playbackTogglePlay},
       pb.playing ? h('span',{}, h('i',{class:'fa-solid fa-pause'}), ' Pause') : (pb.index>=total ? h('span',{}, h('i',{class:'fa-solid fa-rotate-right'}), ' Replay') : h('span',{}, h('i',{class:'fa-solid fa-play'}), ' Play'))),
-    h('button',{class:'btn playback-btn', disabled: pb.index>=total, onclick:()=>playbackStep(1)}, 'Next ', h('i',{class:'fa-solid fa-forward-step'})),
-    h('span',{class:'playback-progress'}, `${pb.index} / ${total} steps`)
-  ));
+    h('button',{class:'btn playback-btn', disabled:pb.index>=total, onclick:()=>playbackStep(1)}, 'Next ', h('i',{class:'fa-solid fa-forward-step'})),
+    h('span',{class:'playback-progress'}, `${pb.index} / ${total} steps`));
+}
+
+function renderCanonicalPlayback(item, assignLabelText, assignLabelCh, options){
+  options=options||{};
+  const pb = options.playback || item.playback;
+  const total = item.canonicalTrace.steps.length;
+
+  const wrap = h('div',{class:'solution-playback'+(options.embedded?' canonical-final-playback':''),
+    'data-canonical-visible':pb.index});
+  if(!options.hideControls) wrap.appendChild(renderPlaybackControls(item,total));
 
   const timeline = h('div',{class:'timeline solution-timeline'});
 
   const state0Row = h('div',{class:'tl-row'+(pb.index===0?' current':' done')});
   state0Row.appendChild(h('div',{class:'tl-dot', style:'background:#4b5364;'}));
   const pend0 = pendingNodeId(item.canonicalTrace.steps[0], item.canonicalTrace.treeStates[0]);
-  state0Row.appendChild(h('div',{class:'code-out'+(pb.index===0?' row-enter':'')}, renderAssignLabel(true, assignLabelText, assignLabelCh), '= ',
+  state0Row.appendChild(h('div',{class:'code-out'+(pb.index===0?' row-enter':'')}, renderAssignLabel(true, assignLabelText, assignLabelCh),
+    h('span',{class:'source-assignment-equals',title:'Assignment operator'},'='),' ',
     renderStaticExpr(item.canonicalTrace.treeStates[0], 0, new Map(), null, pend0,
       stepVisualColor(item.canonicalTrace.steps[0],0)), ';'));
   timeline.appendChild(state0Row);
@@ -344,7 +439,6 @@ function renderCanonicalPlayback(item, assignLabelText, assignLabelCh){
     const revealed = i < pb.index;
     const t = item.canonicalTrace.steps[i];
     const isLast = i === pb.index-1;
-    const isFinalStep = i === total-1; // the step that resolves to the single derived value
     const color = stepVisualColor(t,i);
     const row = h('div',{class:'tl-row'+(isLast?' current':' done')+(revealed?'':' tl-future')});
     row.appendChild(h('div',{class:'tl-dot', style:`background:${color};`+(isLast&&revealed?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''), title: revealed ? stepTooltip(t) : null}));
@@ -353,9 +447,10 @@ function renderCanonicalPlayback(item, assignLabelText, assignLabelCh){
     const colorMap = revealed ? buildColorMap(item.canonicalTrace.steps, i+1) : new Map();
     const nextStep = item.canonicalTrace.steps[i+1];
     const pendId = revealed && nextStep ? pendingNodeId(nextStep, item.canonicalTrace.treeStates[i+1]) : null;
-    row.appendChild(h('div',{class:'code-out'+(isLast&&revealed?' row-enter':'')}, renderAssignLabel(isFinalStep, assignLabelText, assignLabelCh), '= ',
+    row.appendChild(h('div',{class:'code-out'+(isLast&&revealed?' row-enter':'')}, renderAssignLabel(false, assignLabelText, assignLabelCh),
+      h('span',{class:'continuation-equals',title:'Equivalent evaluation step'},'='),' ',
       renderStaticExpr(item.canonicalTrace.treeStates[i+1], 0, colorMap, isLast&&revealed ? t.resultNodeId : null, pendId,
-        revealed&&nextStep ? stepVisualColor(nextStep,i+1) : null), ';'));
+        revealed&&nextStep ? stepVisualColor(nextStep,i+1) : null)));
     timeline.appendChild(row);
   }
 
@@ -377,70 +472,77 @@ function renderExpressionEvaluationPanel(options){
     ? options.renderEquals(ready) : '=';
   const prefixNodes = context=>typeof options.renderPrefix==='function'
     ? options.renderPrefix(context)
-    : [renderAssignLabel(context.showLabel,labelText,labelCh),equalsNode(context.ready),' '];
+    : [renderAssignLabel(context.showLabel,labelText,labelCh),
+      h('span',{class:context.isSource?'source-assignment-equals':'continuation-equals',
+        title:context.isSource?'Assignment operator':'Equivalent evaluation step'},equalsNode(context.ready)),' '];
+  const terminator = context=>options.continuationStyle
+    ? (context.isSource?';':'') : ';';
   const trailingActions = context=>typeof options.renderTrailingActions==='function'
     ? options.renderTrailingActions(context) : null;
-  const panelAttrs = {class:options.panelClass || 'eval-panel'};
+  const panelAttrs = {class:(options.panelClass || 'eval-panel')+' expression-scroll-surface'};
   if(options.statementId) panelAttrs['data-statement-id'] = options.statementId;
   const panel = h('div',panelAttrs);
-  panel.appendChild(h('div',{class:'panel-title'},options.title || 'Evaluation'));
-  const timeline = h('div',{class:'timeline'});
+  if(options.title!==null) panel.appendChild(h('div',{class:'panel-title'},options.title || 'Evaluation'));
+  if(options.beforeTimeline) panel.appendChild(options.beforeTimeline);
+  const timeline = h('div',{class:'timeline expression-timeline'});
 
-  const initRow = h('div',{class:'tl-row'+(runtime.trace.length>0?' done':' current')});
-  initRow.appendChild(h('div',{class:'tl-dot',style:'background:#4b5364;'}));
+  const initRow = h('div',{class:'tl-row source-row'+(runtime.trace.length>0||options.rowsComplete?' done':' current')});
+  initRow.appendChild(h('div',{class:'tl-dot'+(options.statementNumber?' statement-source-dot':''),
+    style:'background:#4b5364;',title:'Original statement'},options.statementNumber?String(options.statementNumber):null));
   if(runtime.trace.length===0){
     const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
     const ready = canInteract && resolved();
     initRow.appendChild(h('div',{class:'code-out'},renderBadgeSlot(null),
-      prefixNodes({showLabel:true,ready,isCurrent:true,isFinalRow:resolved(),activeColor:stepColor(0),
+      prefixNodes({showLabel:true,isSource:true,ready,isCurrent:true,isFinalRow:resolved(),activeColor:stepColor(0),
         stepCount:0,pendingStep:null,currentStep:null,flashId:null}),
       canInteract
         ? renderInteractiveFlatExpr(runtime.workingFlat,new Map(),stepColor(0),null,unresolved)
-        : renderStaticFlatExpr(runtime.workingFlat,new Map(),null,null),';',
+        : renderStaticFlatExpr(runtime.workingFlat,new Map(),null,null),terminator({isSource:true}),
       trailingActions({isCurrent:true,isFinalRow:resolved(),runtime})));
   } else {
     const firstColor = stepVisualColor(runtime.trace[0],0);
     const pending = pendingFlatWithColor(runtime.trace[0],firstColor);
     initRow.appendChild(h('div',{class:'code-out'},renderBadgeSlot(null),
-      prefixNodes({showLabel:true,ready:false,isCurrent:false,isFinalRow:false,activeColor:firstColor,
+      prefixNodes({showLabel:true,isSource:true,ready:false,isCurrent:false,isFinalRow:false,activeColor:firstColor,
         stepCount:0,pendingStep:runtime.trace[0],currentStep:null,flashId:null}),
-      renderStaticFlatExpr(runtime.originalFlat,new Map(),null,pending),';'));
+      renderStaticFlatExpr(runtime.originalFlat,new Map(),null,pending),terminator({isSource:true})));
   }
   timeline.appendChild(initRow);
 
   runtime.trace.forEach((step,index)=>{
     const isLast = index===runtime.trace.length-1;
-    const row = h('div',{class:'tl-row'+(isLast?' current':' done')});
+    const isCurrent=isLast&&!options.rowsComplete;
+    const row = h('div',{class:'tl-row'+(isCurrent?' current':' done')});
     const color = stepVisualColor(step,index);
     const tip = stepTooltip(step,options.revealCorrectness);
-    row.appendChild(h('div',{class:'tl-dot',style:`background:${color};`+(isLast?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''),title:tip}));
+    row.appendChild(h('div',{class:'tl-dot',style:`background:${color};`+(isCurrent?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''),title:tip}));
     const badge = step.action==='EVALUATE' && options.revealCorrectness
       ? h('span',{class:'step-badge '+(step.wasCorrect?'ok':'warn'),title:tip,'aria-label':tip,role:'img'},
           h('i',{class:'fa-solid '+(step.wasCorrect?'fa-check':'fa-exclamation')})) : null;
     const colors = buildColorMap(runtime.trace,index+1);
-    const flashId = step._flashed ? null : step.resultNodeId;
+    const flashId = step._flashed || !isCurrent ? null : step.resultNodeId;
     step._flashed = true;
     const isFinalRow = isLast && resolved();
     if(isLast){
       const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
-      const enterClass = step._entered ? '' : ' row-enter';
+      const enterClass = step._entered || !isCurrent ? '' : ' row-enter';
       step._entered = true;
       row.appendChild(h('div',{class:'code-out'+enterClass},renderBadgeSlot(badge),
-        prefixNodes({showLabel:isFinalRow,ready:canInteract&&isFinalRow,isCurrent:true,isFinalRow,
+        prefixNodes({showLabel:false,isSource:false,ready:canInteract&&isFinalRow,isCurrent:true,isFinalRow,
           activeColor:stepColor(runtime.trace.length),stepCount:index+1,pendingStep:null,
           currentStep:step,flashId}),
         canInteract
           ? renderInteractiveFlatExpr(runtime.workingFlat,colors,stepColor(runtime.trace.length),flashId,unresolved)
-          : renderStaticFlatExpr(runtime.workingFlat,colors,flashId,null),';',
+          : renderStaticFlatExpr(runtime.workingFlat,colors,flashId,null),terminator({isSource:false,isFinalRow}),
         trailingActions({isCurrent:true,isFinalRow,runtime})));
     } else {
       const nextStep = runtime.trace[index+1];
       const nextColor = stepVisualColor(nextStep,index+1);
       const pending = pendingFlatWithColor(nextStep,nextColor);
       row.appendChild(h('div',{class:'code-out'},renderBadgeSlot(badge),
-        prefixNodes({showLabel:false,ready:false,isCurrent:false,isFinalRow:false,activeColor:nextColor,
+        prefixNodes({showLabel:false,isSource:false,ready:false,isCurrent:false,isFinalRow:false,activeColor:nextColor,
           stepCount:index+1,pendingStep:nextStep,currentStep:step,flashId}),
-        renderStaticFlatExpr(runtime.history[index+1],colors,flashId,pending),';'));
+        renderStaticFlatExpr(runtime.history[index+1],colors,flashId,pending),terminator({isSource:false,isFinalRow:false})));
     }
     timeline.appendChild(row);
   });
@@ -451,32 +553,148 @@ function renderExpressionEvaluationPanel(options){
   return panel;
 }
 
-function renderCanonicalDeclarationPrelude(item){
-  const wrap = h('div',{class:'canonical-declaration-prelude'});
-  wrap.appendChild(h('div',{class:'panel-title'}, 'Correct program sequence'));
-  item.program.statements.filter(s=>s.kind==='declaration'||s.kind==='assignment').forEach((statement, index)=>{
-    const runtime = statement.runtime;
-    const isDeclaration=statement.kind==='declaration';
-    const source=isDeclaration
-      ? `${declarationKeyword(statement)} ${statement.binding.name} = ${renderString(runtime.originalTree)};`
-      : `${statement.target} ${statement.operator} ${renderString(runtime.originalTree)};`;
-    const target=isDeclaration?statement.binding.name:statement.target;
-    const value=isDeclaration?runtime.expectedValue:runtime.expectedAfter;
-    wrap.appendChild(h('div',{class:'canonical-declaration-row'},
-      h('span',{class:'canonical-declaration-index'}, String(index+1)),
-      h('code',{},source),
-      h('span',{class:'canonical-declaration-result'}, `→ ${target} = ${formatValue(value)}`)
-    ));
+function canonicalProgramSegments(item){
+  if(!itemHasInteractiveProgram(item)) return [];
+  const segments=[];
+  item.program.statements.forEach((statement,index)=>{
+    if(statement.kind==='declaration'||statement.kind==='assignment'){
+      const expressionSteps=(statement.runtime&&statement.runtime.canonicalTrace
+        ? statement.runtime.canonicalTrace.steps.length : 0);
+      const targetRead=statement.kind==='assignment'&&isCompoundAssignment(statement)?1:0;
+      segments.push({kind:'statement',statement,index,targetRead,expressionSteps,
+        length:targetRead+expressionSteps+1});
+    } else if(statement.kind==='legacy-expression'){
+      segments.push({kind:'final',statement,index,length:item.canonicalTrace.steps.length});
+    }
+  });
+  let start=0;
+  segments.forEach((segment,index)=>{
+    segment.start=start;
+    start+=segment.length+(index<segments.length-1?1:0);
+  });
+  return segments;
+}
+
+function canonicalPlaybackTotal(item){
+  const segments=canonicalProgramSegments(item);
+  return segments.length ? segments[segments.length-1].start+segments[segments.length-1].length
+    : (item&&item.canonicalTrace ? item.canonicalTrace.steps.length : 0);
+}
+
+function canonicalStatementRuntime(statement,localIndex){
+  const source=statement.runtime;
+  const compound=statement.kind==='assignment'&&isCompoundAssignment(statement);
+  const readVisible=compound&&localIndex>0;
+  const expressionVisible=Math.max(0,Math.min(source.canonicalTrace.steps.length,
+    localIndex-(compound?1:0)));
+  const flats=source.canonicalTrace.treeStates.map(tree=>flattenInstance(tree));
+  const trace=[];
+  const history=[deepCloneFlat(flats[0])];
+  if(readVisible){
+    trace.push({action:'READ_TARGET',target:statement.target,targetKind:'variable',
+      sourceValue:source.expectedBefore,resultNodeId:assignmentTargetTokenId(statement),
+      expressionBefore:flatToString(flats[0]),expressionAfter:flatToString(flats[0])});
+    history.push(deepCloneFlat(flats[0]));
+  }
+  for(let i=0;i<expressionVisible;i++){
+    trace.push(source.canonicalTrace.steps[i]);
+    history.push(deepCloneFlat(flats[i+1]));
+  }
+  return Object.assign({},source,{
+    originalFlat:deepCloneFlat(flats[0]),workingFlat:deepCloneFlat(flats[expressionVisible]),
+    history,trace,targetRevealed:readVisible,targetReadValue:source.expectedBefore,
+    checked:false,assignmentMergePending:false
+  });
+}
+
+function canonicalAssignmentPrefix(statement,context){
+  if(isCompoundAssignment(statement)) return renderCompoundAssignmentPrefix(statement,context,false);
+  return [renderAssignLabel(context.showLabel,statement.target,statement.target.length+1),
+    h('span',{class:context.isSource?'source-assignment-equals':'continuation-equals',
+      'data-assignment-op-id':statement.id,title:'Assignment operator'},'='),' '];
+}
+
+function canonicalDeclarationPrefix(statement,labelText,labelCh,context){
+  return [renderAssignLabel(context.showLabel,labelText,labelCh),
+    h('span',{class:context.isSource?'source-assignment-equals':'continuation-equals',
+      'data-assignment-op-id':statement.id,title:'Assignment operator'},'='),' '];
+}
+
+function appendCanonicalAssignmentResult(timeline,statement,runtime,isCurrent){
+  if(statement.kind==='assignment'&&isCompoundAssignment(statement)){
+    const completeStatement=Object.assign({},statement,{runtime:Object.assign({},runtime,{
+      checked:true,beforeValue:runtime.expectedBefore,rhsValue:runtime.expectedRhs,
+      assignedValue:runtime.expectedAfter,assignmentResultNodeId:assignmentResultTokenId(statement),
+      assignmentMergePending:false
+    })});
+    appendCompoundAssignmentResult(timeline,completeStatement,{historical:!isCurrent});
+    return;
+  }
+  const target=statement.kind==='declaration'?statement.binding.name:statement.target;
+  const kind=statement.kind==='declaration'?statement.binding.kind:'variable';
+  const value=statement.kind==='declaration'?runtime.expectedValue:runtime.expectedAfter;
+  const resultId=`canonical-assignment-result-${statement.id}`;
+  const color=stepVisualColor({action:'APPLY_ASSIGNMENT'},runtime.canonicalTrace.steps.length);
+  const row=h('div',{class:`tl-row ${isCurrent?'current':'done'} canonical-assignment-result-row`});
+  row.appendChild(h('div',{class:'tl-dot',style:`background:${color};${isCurrent?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''}`,
+    title:`${target} now stores ${formatValue(value)}`}));
+  const result=renderValueCard({id:resultId,name:target,value,kind,color,isFlash:isCurrent});
+  row.appendChild(h('div',{class:'code-out'+(isCurrent?' row-enter':'')},renderBadgeSlot(null),result));
+  timeline.appendChild(row);
+}
+
+function renderCanonicalStatementSegment(segment,localIndex,globalIndex){
+  const statement=segment.statement;
+  const sourceRuntime=statement.runtime;
+  const runtime=canonicalStatementRuntime(statement,localIndex);
+  const commitVisible=localIndex>=segment.length;
+  const commitCurrent=commitVisible&&globalIndex===segment.start+segment.length;
+  const labelText=statement.kind==='declaration'
+    ? `${declarationKeyword(statement)} ${statement.binding.name}` : statement.target;
+  const viewStatement=Object.assign({},statement,{runtime});
+  const card=h('section',{class:`canonical-program-statement ${statement.kind}-statement`,
+    'data-canonical-statement-id':statement.id});
+  card.appendChild(renderExpressionEvaluationPanel({runtime,labelText,labelCh:labelText.length+1,
+    title:null,panelClass:'canonical-program-expression-panel',statementId:statement.id,
+    statementNumber:segment.index+1,continuationStyle:true,interactive:false,
+    rowsComplete:commitVisible,
+    isFullyResolved:()=>false,
+    renderPrefix:statement.kind==='declaration'
+      ? (context=>canonicalDeclarationPrefix(statement,labelText,labelText.length+1,context))
+      : (context=>canonicalAssignmentPrefix(viewStatement,context)),
+    renderAfterRows:commitVisible?(timeline=>appendCanonicalAssignmentResult(timeline,statement,sourceRuntime,commitCurrent)):null}));
+  return card;
+}
+
+function renderCanonicalProgramPlayback(item,assignLabelText,assignLabelCh){
+  const segments=canonicalProgramSegments(item);
+  const total=canonicalPlaybackTotal(item);
+  const wrap=h('div',{class:'canonical-program-playback'});
+  wrap.appendChild(renderPlaybackControls(item,total));
+  wrap.appendChild(h('div',{class:'panel-title'},'Correct program sequence'));
+  segments.forEach(segment=>{
+    if(item.playback.index<segment.start) return;
+    const localIndex=Math.min(segment.length,item.playback.index-segment.start);
+    if(segment.kind==='statement') wrap.appendChild(renderCanonicalStatementSegment(segment,localIndex,item.playback.index));
+    else wrap.appendChild(renderCanonicalPlayback(item,assignLabelText,assignLabelCh,{
+      playback:{index:localIndex,playing:item.playback.playing},hideControls:true,embedded:true}));
   });
   return wrap;
 }
 
 // Program Core owns statement dispatch; this renderer remains the exact
 // legacy session renderer for the compatibility statement kind.
-registerStatementRenderer('legacy-expression', ({container, program, isActive})=>{
+registerStatementRenderer('legacy-expression', ({container,item,program,statement,statementIndex,isActive})=>{
   // A one-statement compatibility item renders exactly as before. In an
-  // interactive declaration chain, the final expression stays hidden and
-  // inactive until Program Core advances to it.
-  if(program.statements.length>1 && !isActive) return;
+  // interactive program, the final expression remains visible as a compact
+  // waiting line until Program Core advances to it.
+  if(program.statements.length>1 && !isActive){
+    const card=h('section',{class:`program-statement legacy-program-statement ${statement.status}`,
+      'data-statement-id':statement.id});
+    card.appendChild(renderProgramStatementSummary(statement,statementIndex,
+      programStatementSource(statement,item)));
+    container.appendChild(card);
+    return;
+  }
   renderSession(container);
 });
