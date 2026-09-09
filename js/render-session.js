@@ -77,6 +77,41 @@ function strictPracticeInvalidMessage(item){
   return `${labels[item.practiceInvalidExecution.reason]||'This action cannot execute in the current program state.'} Use Undo to return to the executable state.`;
 }
 
+function renderInvalidExecutionAlert(item){
+  const practiceFailure=state.mode==='practice'&&item&&item.practiceInvalidExecution;
+  const examFailure=state.mode==='exam'&&item&&item.examSequenceFailure
+    &&item.examSequenceFailure.terminal;
+  if(!practiceFailure&&!examFailure) return null;
+  const title=practiceFailure?'Invalid execution':'Invalid execution — item ended';
+  const message=practiceFailure
+    ? strictPracticeInvalidMessage(item)
+    : 'This item can no longer continue. Credit earned before this action has been recorded.';
+  const action=practiceFailure
+    ? h('button',{class:'invalid-execution-recovery',type:'button',onclick:handleUndo,
+        'aria-label':'Undo invalid action and continue'},
+        h('i',{class:'fa-solid fa-rotate-left','aria-hidden':'true'}),
+        h('span',{},'Undo invalid action'))
+    : null;
+  return h('div',{class:`invalid-execution-alert ${practiceFailure?'recoverable':'terminal'}`,
+      role:'alert','aria-live':'assertive'},
+    h('div',{class:'invalid-execution-icon','aria-hidden':'true'},
+      h('i',{class:`fa-solid ${practiceFailure?'fa-triangle-exclamation':'fa-circle-exclamation'}`})),
+    h('div',{class:'invalid-execution-content'},
+      h('div',{class:'invalid-execution-title'},title),
+      h('div',{class:'invalid-execution-message'},message),
+      action));
+}
+
+function bringInvalidExecutionAlertIntoView(){
+  if(typeof document==='undefined') return;
+  setTimeout(()=>{
+    const alert=document.querySelector&&document.querySelector('.invalid-execution-alert');
+    if(alert&&typeof alert.scrollIntoView==='function'){
+      alert.scrollIntoView({behavior:'smooth',block:'nearest',inline:'nearest'});
+    }
+  },0);
+}
+
 function renderItemResetControl(show){
   if(!show) return null;
   return h('div',{class:'item-reset-control'},
@@ -291,36 +326,36 @@ function renderSession(container){
     revealCorrectness:item.checked&&state.mode!=='exam',
     isFullyResolved:()=>itemFullyResolved(item),
     renderTrailingActions:()=>renderInlineEvaluationActions({
-      canUndo:canUndoForCurrentMode(item),
+      canUndo:canUndoForCurrentMode(item)&&!item.practiceInvalidExecution,
       canCheck:!item.checked&&itemFullyResolved(item)
     })
   });
   evaluationHost.appendChild(evalPanel);
+  const invalidExecutionAlert=renderInvalidExecutionAlert(item);
+  if(invalidExecutionAlert) evaluationHost.appendChild(invalidExecutionAlert);
   const canReset = state.mode==='practice' && !item.checked && (
     item.trace.length>0 || (item.program && item.program.cursor>0));
   const resetControl=renderItemResetControl(canReset);
   if(resetControl) evaluationHost.appendChild(resetControl);
 
-  if(!itemFullyResolved(item) && !item.checked
+  if(!item.practiceInvalidExecution&&!itemFullyResolved(item) && !item.checked
     &&(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance)){
-    if(state.mode==='practice'&&item.practiceInvalidExecution){
-      evaluationHost.appendChild(renderContextHelp(strictPracticeInvalidMessage(item)));
-    } else {
     const unresolvedCount = collectUnresolvedFlat(item.workingFlat,[]).length;
     if(unresolvedCount>0){
       evaluationHost.appendChild(renderContextHelp(`Resolve ${unresolvedCount} more highlighted token${unresolvedCount>1?'s':''} (variable, constant, or unary) before operators become active.`));
     } else {
       evaluationHost.appendChild(renderContextHelp('Tap any highlighted operator to evaluate it — you choose the order. Wrong order is allowed; you\'ll see how it plays out.'));
     }
-    }
   }
 
   // feedback
   const examFeedbackDeferred=state.mode==='exam'&&!state.examSubmitted;
   if(item.checked&&examFeedbackDeferred){
-    container.appendChild(h('div',{class:'exam-answer-recorded'},
-      h('i',{class:'fa-solid fa-lock'}),
-      h('span',{},h('b',{},'Answer recorded and locked.'),' Correctness and score are withheld until the exam is submitted.')));
+    if(!(item.examSequenceFailure&&item.examSequenceFailure.terminal)){
+      container.appendChild(h('div',{class:'exam-answer-recorded'},
+        h('i',{class:'fa-solid fa-lock'}),
+        h('span',{},h('b',{},'Answer recorded and locked.'),' Correctness and score are withheld until the exam is submitted.')));
+    }
     if(typeof clearFeedbackDrawerContent==='function'){
       try{
         clearFeedbackDrawerContent();

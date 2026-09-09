@@ -362,6 +362,7 @@ function pauseStrictPracticeItem(item,action,reason,statement){
     recoverable:true
   };
   render();
+  if(typeof bringInvalidExecutionAlertIntoView==='function') bringInvalidExecutionAlertIntoView();
   return true;
 }
 
@@ -396,6 +397,7 @@ function terminateStrictExamItem(item,action,reason,statement){
   recordExamAction(item,action,{statementId:statement&&statement.id,wasCorrect:false,
     scoredAction:true,creditEligible:false,terminal:true,reason});
   render();
+  if(typeof bringInvalidExecutionAlertIntoView==='function') bringInvalidExecutionAlertIntoView();
   return true;
 }
 

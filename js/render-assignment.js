@@ -111,8 +111,10 @@ function renderAssignmentStatement(ctx){
     renderPrefix:compound?(context=>renderCompoundAssignmentPrefix(statement,context,isActive,item)):null,
     renderAfterRows:compound?(timeline=>appendCompoundAssignmentResult(timeline,statement)):null,
     renderTrailingActions:()=>isActive
-      ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)})
+      ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)&&!item.practiceInvalidExecution})
       : renderCollapseStatementAction(statement,statementIndex)}));
+  const invalidExecutionAlert=renderInvalidExecutionAlert(item);
+  if(invalidExecutionAlert) card.appendChild(invalidExecutionAlert);
   if(isActive&&!item.checked){
     const unresolved=collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
     const ready=assignmentRhsResolved(statement);
@@ -121,9 +123,9 @@ function renderAssignmentStatement(ctx){
     else if(unresolved) guidance='Substitute initialized values from program memory before evaluating the assignment value.';
     else if(!ready) guidance='Evaluate the highlighted operator.';
     else guidance=`Both values are ready. Click ${statement.operator} to update ${statement.target}.`;
-    if(state.mode==='practice'&&item.practiceInvalidExecution){
-      card.appendChild(renderContextHelp(strictPracticeInvalidMessage(item)));
-    } else if(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance) card.appendChild(renderContextHelp(guidance));
+    if(!item.practiceInvalidExecution&&(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance)){
+      card.appendChild(renderContextHelp(guidance));
+    }
     const canReset=state.mode==='practice'&&(program.cursor>0||runtime.trace.length>0||runtime.targetRevealed);
     const resetControl=renderItemResetControl(canReset);
     if(resetControl) card.appendChild(resetControl);

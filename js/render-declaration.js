@@ -51,16 +51,17 @@ function renderDeclarationStatement(ctx){
     isFullyResolved:()=>declarationInitializerResolved(statement),
     renderEquals:(ready,context)=>renderDeclarationEquals(statement,ready,context,item),
     renderTrailingActions:()=>isActive
-      ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)})
+      ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)&&!item.practiceInvalidExecution})
       : renderCollapseStatementAction(statement,statementIndex)
   }));
+
+  const invalidExecutionAlert=renderInvalidExecutionAlert(item);
+  if(invalidExecutionAlert) card.appendChild(invalidExecutionAlert);
 
   if(isActive&&!item.checked){
     const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
     const ready = declarationInitializerResolved(statement);
-    if(state.mode==='practice'&&item.practiceInvalidExecution){
-      card.appendChild(renderContextHelp(strictPracticeInvalidMessage(item)));
-    } else if(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance){
+    if(!item.practiceInvalidExecution&&(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance)){
       card.appendChild(renderContextHelp(unresolved
         ? 'Substitute the initialized value from program memory before evaluating this initializer.'
         : (ready ? `The initializer is resolved. Click = to assign it to ${statement.binding.name}.`
