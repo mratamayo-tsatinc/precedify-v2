@@ -94,17 +94,60 @@
           oninput="validateTimerInput(this)"
         >
         <small class="input-hint">Enter a number between 1 and 999 minutes</small>
+
+        <div class="exam-policy-settings">
+          <label class="settings-label">Exam behavior</label>
+          <label class="setting-toggle">
+            <input type="checkbox" id="examAllowUndo">
+            <span><b>Allow one-step Undo</b><small>Only within the current unfinished statement.</small></span>
+          </label>
+          <label class="setting-toggle">
+            <input type="checkbox" id="examAllowReviewFlags">
+            <span><b>Allow flags for review</b><small>Students can mark unfinished items to revisit.</small></span>
+          </label>
+          <label class="setting-toggle">
+            <input type="checkbox" id="examShowNeutralGuidance">
+            <span><b>Show neutral guidance</b><small>Displays interaction instructions without correctness feedback.</small></span>
+          </label>
+          <label class="setting-toggle">
+            <input type="checkbox" id="examShowScoresDuringExam">
+            <span><b>Show running scores</b><small>Normally hidden until final submission.</small></span>
+          </label>
+          <label class="settings-field-label" for="examFeedbackRelease">Results after submission</label>
+          <select id="examFeedbackRelease" class="settings-select">
+            <option value="after-submit">Show scores and item results</option>
+            <option value="never">Record submission only</option>
+          </select>
+          <p class="exam-policy-note"><i class="fa-solid fa-lock"></i> Checked items lock permanently. The correct-solution playback is always unavailable in Exam mode, and timeout always submits the saved attempt.</p>
+        </div>
       </div>
 
       <div class="settings-section settings-danger-zone">
         <label class="settings-label">Danger Zone</label>
-        <p class="input-hint" style="margin-top:0;margin-bottom:10px;">
-          Permanently deletes every student's saved exam progress on this device/browser — not just yours. Use this for an intentional, full reset (e.g. clearing a shared lab machine), not as a routine action.
-        </p>
-        <button type="button" class="danger-btn" onclick="handleClearAllExamProgress()">
-          <i class="fa-solid fa-trash"></i> Clear all exam progress (all students)
-        </button>
-        <div id="clearExamProgressResult" class="input-hint" style="display:none;"></div>
+        <p class="input-hint" style="margin-top:0;margin-bottom:10px;">These actions have intentionally different scopes.</p>
+        <div class="danger-actions">
+          <div class="danger-action">
+            <button type="button" class="danger-btn" onclick="handleClearAllExamProgress()">
+              <i class="fa-solid fa-user-slash"></i> Clear all exam progress
+            </button>
+            <small>Deletes every student's saved attempt; keeps settings and login.</small>
+            <div id="clearExamProgressResult" class="input-hint danger-result" style="display:none;"></div>
+          </div>
+          <div class="danger-action">
+            <button type="button" class="danger-btn" onclick="handleResetApplicationSettings()">
+              <i class="fa-solid fa-rotate-left"></i> Reset application settings
+            </button>
+            <small>Restores built-in settings; keeps every student attempt.</small>
+            <div id="resetSettingsResult" class="input-hint danger-result" style="display:none;"></div>
+          </div>
+          <div class="danger-action danger-action-total">
+            <button type="button" class="danger-btn danger-btn-solid" onclick="handleClearAllLocalData()">
+              <i class="fa-solid fa-trash"></i> Clear all local application data
+            </button>
+            <small>Deletes settings, saved login, and all student attempts.</small>
+            <div id="clearAllDataResult" class="input-hint danger-result" style="display:none;"></div>
+          </div>
+        </div>
       </div>
     </div><!-- closes modal-body -->
     <div class="modal-footer">
@@ -262,6 +305,9 @@
             <button id="scoreSummaryBtn" class="score-summary-btn" onclick="openScoreSummaryModal()" title="View score summary">
               <i class="fa-solid fa-chart-simple"></i> Scores
             </button>
+            <button id="submitExamBtn" class="submit-exam-btn" onclick="submitExam(false)" title="Submit and lock the examination" style="display:none;">
+              <i class="fa-solid fa-paper-plane"></i> Submit exam
+            </button>
           </div>
           <div id="userStatusText" class="user-status-text">
             <div id="userStatusName"></div>
@@ -317,6 +363,7 @@
 <script src="js/render-declaration.js"></script>
 <script src="js/render-assignment.js"></script>
 <script src="js/render-session.js"></script>
+<script src="js/render-done.js"></script>
 <script src="js/login.js"></script>
 <script src="js/main.js"></script>
 </body>

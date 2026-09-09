@@ -38,6 +38,7 @@ function computeGrandTotalScore(){
 }
 
 function openScoreSummaryModal(){
+  if(!examResultsVisible()) return;
   // .modal is centered via CSS display:flex + align-items/justify-content —
   // setting display:'block' here would silently defeat that centering and
   // drop the modal into the page's normal top-left flow instead.

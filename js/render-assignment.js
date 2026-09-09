@@ -102,14 +102,14 @@ function renderAssignmentStatement(ctx){
   const compound=isCompoundAssignment(statement);
   card.appendChild(renderExpressionEvaluationPanel({runtime,labelText,labelCh:labelText.length+1,
     title:null,panelClass:'assignment-eval-panel program-expression-panel',
-    statementId:statement.id,interactive:isActive&&!runtime.checked,revealCorrectness:runtime.checked,
+    statementId:statement.id,interactive:isActive&&!runtime.checked,revealCorrectness:runtime.checked&&state.mode!=='exam',
     statementNumber:statementIndex+1,continuationStyle:true,
     isFullyResolved:()=>compound?assignmentReadyToApply(statement):assignmentRhsResolved(statement),
     renderEquals:ready=>renderAssignmentOperator(statement,ready),
     renderPrefix:compound?(context=>renderCompoundAssignmentPrefix(statement,context,isActive)):null,
     renderAfterRows:compound?(timeline=>appendCompoundAssignmentResult(timeline,statement)):null,
     renderTrailingActions:()=>isActive
-      ? renderInlineEvaluationActions({canUndo:canUndoProgram(item)})
+      ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)})
       : renderCollapseStatementAction(statement,statementIndex)}));
   if(isActive){
     const unresolved=collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
@@ -119,7 +119,7 @@ function renderAssignmentStatement(ctx){
     else if(unresolved) guidance='Substitute initialized values from program memory before evaluating the assignment value.';
     else if(!ready) guidance='Evaluate the highlighted operator.';
     else guidance=`Both values are ready. Click ${statement.operator} to update ${statement.target}.`;
-    card.appendChild(renderContextHelp(guidance));
+    if(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance) card.appendChild(renderContextHelp(guidance));
     const canReset=state.mode==='practice'&&(program.cursor>0||runtime.trace.length>0||runtime.targetRevealed);
     const resetControl=renderItemResetControl(canReset);
     if(resetControl) card.appendChild(resetControl);

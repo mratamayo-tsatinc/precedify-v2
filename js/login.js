@@ -105,13 +105,11 @@ function handleLogin(event) {
     // and re-loaded on app boot / whenever Settings is opened, so it's a
     // reliable, disk-backed signal here — not something that merely
     // happens to still be sitting in memory. Resume only if that persisted
-    // mode is currently 'exam'; otherwise this is treated as an
-    // intentional switch away from exam and any leftover record for this
-    // email is cleared so it can't resurface later.
+    // mode is currently 'exam'. Practice sessions never delete a stored
+    // exam; only an explicit Danger Zone action may purge an attempt.
     if (appSettings.mode === 'exam' && tryResumeExamSession(email)) {
       return;
     }
-    clearExamProgress(email);
     startSession();
   }, 300);
 }
@@ -162,6 +160,14 @@ function openSettingsModal() {
   // Set current settings in the modal
   document.querySelector(`input[name="mode"][value="${appSettings.mode}"]`).checked = true;
   document.getElementById('timerInput').value = appSettings.timerMinutes;
+  const exam=appSettings.exam;
+  const setChecked=(id,value)=>{const el=document.getElementById(id);if(el)el.checked=!!value;};
+  setChecked('examAllowUndo',exam.allowUndo);
+  setChecked('examAllowReviewFlags',exam.allowReviewFlags);
+  setChecked('examShowNeutralGuidance',exam.showNeutralGuidance);
+  setChecked('examShowScoresDuringExam',exam.showScoresDuringExam);
+  const release=document.getElementById('examFeedbackRelease');
+  if(release) release.value=exam.feedbackRelease;
   
   // Show/hide timer section based on mode
   const timerSection = document.getElementById('timerSection');
@@ -171,8 +177,7 @@ function openSettingsModal() {
     timerSection.style.display = 'none';
   }
 
-  const resultEl = document.getElementById('clearExamProgressResult');
-  if (resultEl) resultEl.style.display = 'none';
+  document.querySelectorAll('.danger-result').forEach(el=>{el.style.display='none';});
 }
 
 function closeSettingsModal() {
@@ -227,6 +232,15 @@ function saveSettings() {
   }
   
   appSettings.mode = selectedMode;
+  const checked=id=>{const el=document.getElementById(id);return !!(el&&el.checked);};
+  appSettings.exam={
+    allowUndo:checked('examAllowUndo'),
+    allowReviewFlags:checked('examAllowReviewFlags'),
+    showNeutralGuidance:checked('examShowNeutralGuidance'),
+    showScoresDuringExam:checked('examShowScoresDuringExam'),
+    feedbackRelease:(document.getElementById('examFeedbackRelease')||{}).value==='never'?'never':'after-submit',
+    lockItemAfterCheck:true,autoSubmitOnTimeout:true,showCorrectSolution:false
+  };
   // Persist immediately — this global setting is the single source of
   // truth every subsequent refresh/login checks before resuming exam
   // progress (see main.js / login.js).
@@ -249,6 +263,25 @@ function handleClearAllExamProgress() {
       : 'No saved exam progress was found.';
     resultEl.style.display = 'block';
   }
+}
+
+function showDangerResult(id,message){
+  const resultEl=document.getElementById(id);
+  if(resultEl){resultEl.textContent=message;resultEl.style.display='block';}
+}
+
+function handleResetApplicationSettings(){
+  if(!confirm('Reset activity and exam settings to their built-in defaults? Student exam progress will not be deleted.')) return;
+  resetPersistedAppSettings();
+  openSettingsModal();
+  showDangerResult('resetSettingsResult','Application settings restored to defaults. Student attempts were preserved.');
+}
+
+function handleClearAllLocalData(){
+  if(!confirm('Delete application settings, saved login information, and every student exam attempt on this device? This cannot be undone.')) return;
+  const count=clearAllPrecedifyLocalData();
+  openSettingsModal();
+  showDangerResult('clearAllDataResult',`Cleared ${count} stored application record${count===1?'':'s'}.`);
 }
 
 // ============================================================================
@@ -279,7 +312,7 @@ function startTimer(resumeSeconds) {
     examEndTimestamp = Date.now() + timeRemaining * 1000;
   } else {
     // Initialize timer from the configured duration (appSettings.timerMinutes)
-    timeRemaining = appSettings.timerMinutes * 60; // Convert to seconds
+    timeRemaining = (state.examTimerMinutes || appSettings.timerMinutes) * 60; // Convert to seconds
     examEndTimestamp = Date.now() + timeRemaining * 1000;
   }
   // Persist the deadline immediately, rather than waiting for the next
@@ -336,10 +369,8 @@ function stopTimer() {
 
 function handleTimerExpired() {
   stopTimer();
-  if (typeof clearExamProgress === 'function') clearExamProgress(state.userEmail);
-  alert('Time is up! Your exam session has ended.');
-  state.screen = 'done';
-  render();
+  alert('Time is up. Your exam has been submitted automatically.');
+  submitExam(true);
 }
 
 // ============================================================================
@@ -441,6 +472,7 @@ function selectProfile(profileId) {
 // handleCheck() writes item.points and render() re-runs. Returns null (no
 // pill shown) until at least one item in that profile has been checked.
 function computeProfileScore(profileId){
+  if(!examResultsVisible()) return null;
   const items = state.itemsByProfile && state.itemsByProfile[profileId];
   if(!items || items.length===0) return null;
   const anyChecked = items.some(it => it.checked);
@@ -500,14 +532,19 @@ function buildItemPageWindow(total, current) {
 //   ''          — untouched
 function itemPageStatus(item){
   if (!item) return '';
+  if(state.mode==='exam'&&!state.examSubmitted){
+    if(item.checked) return 'locked';
+    if(item.flagged) return 'flagged';
+    if(itemHasAttempt(item)) return 'attempted';
+    return '';
+  }
   if (item.checked) return item.wasCorrectFinal ? 'correct' : 'incorrect';
-  if (item.trace && item.trace.length > 0) return 'attempted';
-  if (item.program && (item.program.cursor>0 || item.program.statements.some(s=>s.runtime && s.runtime.trace && s.runtime.trace.length>0))) return 'attempted';
+  if(itemHasAttempt(item)) return 'attempted';
   return '';
 }
-const ITEM_STATUS_CLASS = {correct:'item-page-correct', incorrect:'item-page-incorrect', attempted:'item-page-attempted'};
-const ITEM_STATUS_LABEL = {correct:', correct', incorrect:', incorrect', attempted:', in progress', '':', not yet answered'};
-const ITEM_STATUS_MARK = {correct:' \u2713', incorrect:' \u2715', attempted:' \u2022', '':''};
+const ITEM_STATUS_CLASS = {correct:'item-page-correct',incorrect:'item-page-incorrect',attempted:'item-page-attempted',locked:'item-page-locked',flagged:'item-page-flagged'};
+const ITEM_STATUS_LABEL = {correct:', correct',incorrect:', incorrect',attempted:', in progress',locked:', answer locked',flagged:', flagged for review','':', not yet answered'};
+const ITEM_STATUS_MARK = {correct:' \u2713',incorrect:' \u2715',attempted:' \u2022',locked:' \uD83D\uDD12',flagged:' \u2691','':''};
 
 function buildItemPaginationHtml(total, currentIdx, items) {
   if (total <= 1) return '';

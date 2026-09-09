@@ -14,6 +14,10 @@ const state = {
   items: [], // {originalTree, originalFlat, decls, correctFinalValue, canonicalTrace, workingFlat, history:[], trace:[], checked, itemScore, revealSolution}
   itemsByProfile: {}, // Stores all generated items per profile for persistence
   sessionSeed: null, // Seed used for reproducible item generation
+  examPolicy: null, // immutable snapshot of exam settings captured when an attempt starts
+  examTimerMinutes: null,
+  examSubmitted: false,
+  examSubmittedAt: null
 };
 
 // ============================================================================
@@ -24,10 +28,65 @@ const state = {
 //  - mode: 'practice' or 'exam' (set once at login)
 //  - timerMinutes: duration for exam mode (set once at login)
 // ============================================================================
-let appSettings = {
-  mode: 'practice', // 'practice' or 'exam' — set at login, fixed for the session
-  timerMinutes: 15  // duration for exam mode (minutes)
-};
+const DEFAULT_APP_SETTINGS = Object.freeze({
+  schemaVersion: 2,
+  mode: 'practice',
+  timerMinutes: 15,
+  exam: Object.freeze({
+    allowUndo: true,
+    allowReviewFlags: true,
+    showNeutralGuidance: false,
+    showScoresDuringExam: false,
+    feedbackRelease: 'after-submit', // after-submit | never
+    lockItemAfterCheck: true,
+    autoSubmitOnTimeout: true,
+    showCorrectSolution: false
+  })
+});
+
+function cloneDefaultAppSettings(){
+  return {
+    schemaVersion:DEFAULT_APP_SETTINGS.schemaVersion,
+    mode:DEFAULT_APP_SETTINGS.mode,
+    timerMinutes:DEFAULT_APP_SETTINGS.timerMinutes,
+    exam:Object.assign({},DEFAULT_APP_SETTINGS.exam)
+  };
+}
+
+let appSettings = cloneDefaultAppSettings();
+
+function snapshotExamPolicy(settings){
+  return Object.assign({},DEFAULT_APP_SETTINGS.exam,(settings&&settings.exam)||{}, {
+    // Correct-solution disclosure is never a configurable exam behavior.
+    showCorrectSolution:false,
+    lockItemAfterCheck:true,
+    autoSubmitOnTimeout:true
+  });
+}
+
+function activeExamPolicy(){
+  return state.examPolicy || snapshotExamPolicy(appSettings);
+}
+
+function examAllowsUndo(){
+  return state.mode!=='exam' || (!state.examSubmitted && activeExamPolicy().allowUndo);
+}
+
+function examResultsVisible(){
+  if(state.mode!=='exam') return true;
+  return state.examSubmitted
+    ? activeExamPolicy().feedbackRelease==='after-submit'
+    : activeExamPolicy().showScoresDuringExam;
+}
+
+function canUndoForCurrentMode(item){
+  if(!item||item.checked||!examAllowsUndo()) return false;
+  if(state.mode!=='exam') return canUndoProgram(item);
+  const statement=currentProgramStatement(item);
+  const plugin=statementPluginFor(statement);
+  return !!(plugin&&typeof plugin.canUndo==='function'
+    &&plugin.canUndo({program:item.program,statement,item}));
+}
 
 // ============================================================================
 // TIMER STATE — Session-level countdown for exam mode
@@ -71,6 +130,10 @@ function generateItemsForProfile(profileId) {
       wasCorrectFinal: null,
       showSolution: false,
       playback: null,
+      flagged: false,
+      lockedAt: null,
+      examOmitted: false,
+      examActionLog: [],
       _bindings: null // lazily built by var-final-state.js (ensureBindings)
     };
     buildGeneratedProgram(item, profile);
@@ -80,16 +143,21 @@ function generateItemsForProfile(profileId) {
 }
 
 function startSession(){
-  // Generate a seed based on current timestamp if not already set
-  if (!state.sessionSeed) {
-    state.sessionSeed = Date.now() >>> 0; // Use current timestamp as seed
-  }
+  // A fresh login is a fresh attempt. Resumed exams bypass this function and
+  // restore their saved seed, so reload/logout-login still reproduces exactly
+  // the same items while a different student never inherits an in-memory seed.
+  state.sessionSeed = Date.now() >>> 0;
   
   // Initialize seeded random generator
   initializeSeededRandom(state.sessionSeed);
   
   // Apply settings mode
   state.mode = appSettings.mode;
+  state.examPolicy = state.mode==='exam' ? snapshotExamPolicy(appSettings) : null;
+  state.examTimerMinutes = state.mode==='exam' ? appSettings.timerMinutes : null;
+  state.examSubmitted = false;
+  state.examSubmittedAt = null;
+  state.itemIndexByProfile = {};
   
   // Generate items for ALL profiles once using the seed
   state.itemsByProfile = {};
@@ -127,8 +195,20 @@ function itemFullyResolved(item){
 function handleTokenClick(action){
   const item = currentItem();
   const applyAction = ()=>{
+    const statement=currentProgramStatement(item);
+    const runtime=statement&&statement.kind==='legacy-expression'?item:(statement&&statement.runtime);
+    const traceLength=runtime&&runtime.trace?runtime.trace.length:0;
     const result = dispatchProgramAction(item, action, {applyExpressionAction});
-    if(result.applied) render();
+    if(result.applied){
+      const producedStep=runtime&&runtime.trace&&runtime.trace.length>traceLength
+        ? runtime.trace[runtime.trace.length-1] : null;
+      recordExamAction(item,action,{
+        statementId:statement&&statement.id,
+        wasCorrect:producedStep&&producedStep.wasCorrect,
+        value:result.event&&result.event.value
+      });
+      render();
+    }
     return !!result.applied;
   };
 
@@ -147,6 +227,14 @@ function handleTokenClick(action){
   if(typeof prepareLiveStepStage==='function'
     && prepareLiveStepStage(item,action,commitAction)) return;
   commitAction();
+}
+
+function recordExamAction(item,action,detail){
+  if(state.mode!=='exam'||state.examSubmitted||!item) return;
+  if(!Array.isArray(item.examActionLog)) item.examActionLog=[];
+  item.examActionLog.push(Object.assign({
+    type:action&&action.type?action.type:String(action),timestamp:Date.now()
+  },detail||{}));
 }
 
 // Existing expression semantics, extracted behind the statement-plugin
@@ -215,8 +303,15 @@ function applyExpressionAction(item, action){
 
 function handleUndo(){
   const item = currentItem();
+  if(!examAllowsUndo() || !item || item.checked) return;
+  if(state.mode==='exam'){
+    const statement=currentProgramStatement(item);
+    const plugin=statementPluginFor(statement);
+    if(!plugin || typeof plugin.canUndo!=='function'
+      || !plugin.canUndo({program:item.program,statement,item})) return;
+  }
   const result = undoProgramAction(item, {undoExpressionAction});
-  if(result.applied) render();
+  if(result.applied){recordExamAction(item,{type:'undo'});render();}
 }
 
 // Original expression-local undo behavior used by the compatibility plugin.
@@ -368,8 +463,78 @@ function scoreItem(facts, pointsPerItem){
 }
 
 function handleCheck(){
-  const result = checkProgramItem(currentItem(), {checkExpressionItem});
-  if(result.applied) render();
+  const item=currentItem();
+  if(state.examSubmitted || !item) return;
+  const result = checkProgramItem(item, {checkExpressionItem});
+  if(result.applied){
+    if(state.mode==='exam'){
+      item.lockedAt=Date.now();
+      item.flagged=false;
+      item.showSolution=false;
+      item.playback=null;
+      recordExamAction(item,{type:'check'},{wasCorrect:item.wasCorrectFinal});
+    }
+    render();
+  }
+}
+
+function toggleCurrentItemFlag(){
+  const item=currentItem();
+  if(state.mode!=='exam'||state.examSubmitted||!activeExamPolicy().allowReviewFlags
+    ||!item||item.checked) return;
+  item.flagged=!item.flagged;
+  recordExamAction(item,{type:item.flagged?'flag':'unflag'});
+  render();
+}
+
+function allExamItems(){
+  const rows=[];
+  PROFILES.forEach(profile=>{
+    (state.itemsByProfile[profile.id]||[]).forEach((item,index)=>rows.push({profile,item,index}));
+  });
+  return rows;
+}
+
+function examAttemptSummary(){
+  const rows=allExamItems();
+  return {
+    total:rows.length,
+    answered:rows.filter(row=>row.item.checked).length,
+    inProgress:rows.filter(row=>!row.item.checked&&itemHasAttempt(row.item)).length,
+    unattempted:rows.filter(row=>!row.item.checked&&!itemHasAttempt(row.item)).length,
+    flagged:rows.filter(row=>row.item.flagged).length
+  };
+}
+
+function itemHasAttempt(item){
+  if(!item) return false;
+  if(item.trace&&item.trace.length) return true;
+  return !!(item.program&&(item.program.cursor>0||item.program.statements.some(statement=>
+    statement.runtime&&statement.runtime.trace&&statement.runtime.trace.length)));
+}
+
+function submitExam(force){
+  if(state.mode!=='exam'||state.examSubmitted) return false;
+  const summary=examAttemptSummary();
+  if(!force&&typeof confirm==='function'){
+    const accepted=confirm(`Submit this exam?\n\n${summary.answered} answered\n${summary.inProgress} in progress\n${summary.unattempted} unattempted\n${summary.flagged} flagged\n\nAfter submission, answers cannot be changed.`);
+    if(!accepted) return false;
+  }
+  allExamItems().forEach(({profile,item})=>{
+    if(item.checked) return;
+    item.examOmitted=true;
+    item.flagged=false;
+    item.points=0;
+    item.maxPoints=profile.pointsPerItem;
+    item.itemScore=0;
+  });
+  state.examSubmitted=true;
+  state.examSubmittedAt=Date.now();
+  state.screen='done';
+  if(typeof stopTimer==='function') stopTimer();
+  if(typeof saveExamProgress==='function') saveExamProgress();
+  render();
+  return true;
 }
 
 // Scoring for the legacy expression statement is unchanged; it is now a
@@ -414,6 +579,17 @@ function checkExpressionItem(item){
     totalOpSteps:totalOpSteps + priorTotalChecks,
     wasCorrectFinal
   };
+  if(state.mode==='exam'&&Array.isArray(item.examActionLog)){
+    const attemptedEvaluations=item.examActionLog.filter(entry=>entry.type==='evaluate');
+    if(attemptedEvaluations.length){
+      const assignmentStatements=item.program&&item.program.scoreAssignments
+        ? item.program.statements.filter(statement=>['declaration','assignment'].includes(statement.kind)
+          &&statement.runtime&&statement.runtime.checked) : [];
+      scoringFacts.correctSteps=attemptedEvaluations.filter(entry=>entry.wasCorrect===true).length
+        +assignmentStatements.filter(statement=>statement.runtime.wasCorrectAssignment).length;
+      scoringFacts.totalOpSteps=attemptedEvaluations.length+assignmentStatements.length;
+    }
+  }
   const {points, maxPoints} = scoreItem(scoringFacts, itemProfile.pointsPerItem);
   item.points = points;
   item.maxPoints = maxPoints;
@@ -456,6 +632,7 @@ function handleRetrySameItem(){
 
 function toggleSolution(){
   const item = currentItem();
+  if(state.mode==='exam') return;
   item.showSolution = !item.showSolution;
   if(item.showSolution){
     if(!item.playback) item.playback = {index:0, playing:false};

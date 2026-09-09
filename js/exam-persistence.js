@@ -38,9 +38,10 @@ function clearExamProgress(email){
 // itself is the only thing that matters for "practice is never persisted".
 function saveExamProgress(){
   if(appSettings.mode !== 'exam' || !state.userEmail) return;
-  if(state.screen !== 'session') return;
+  if(state.screen !== 'session' && !(state.screen==='done'&&state.examSubmitted)) return;
   try{
     const record = {
+      schemaVersion: 2,
       email: state.userEmail,
       studentId: state.userStudentId,
       profileId: state.profileId,
@@ -49,7 +50,10 @@ function saveExamProgress(){
       sessionSeed: state.sessionSeed,
       itemsByProfile: state.itemsByProfile,
       showConnectors: state.showConnectors,
-      timerMinutes: appSettings.timerMinutes,
+      timerMinutes: state.examTimerMinutes || appSettings.timerMinutes,
+      examPolicy: activeExamPolicy(),
+      submitted: !!state.examSubmitted,
+      submittedAt: state.examSubmittedAt,
       examEndTimestamp: examEndTimestamp,
       savedAt: Date.now()
     };
@@ -89,7 +93,6 @@ function tryResumeExamSession(email){
   if(!record) return false;
 
   appSettings.mode = 'exam';
-  appSettings.timerMinutes = record.timerMinutes || appSettings.timerMinutes;
 
   state.userEmail = record.email;
   state.userStudentId = record.studentId;
@@ -98,6 +101,11 @@ function tryResumeExamSession(email){
   state.itemIndex = record.itemIndex || 0;
   state.itemIndexByProfile = record.itemIndexByProfile || {};
   state.sessionSeed = record.sessionSeed;
+  state.examPolicy = snapshotExamPolicy({exam:record.examPolicy||appSettings.exam});
+  state.examTimerMinutes = record.timerMinutes || appSettings.timerMinutes;
+  state.examSubmitted = !!record.submitted;
+  state.examSubmittedAt = record.submittedAt || null;
+  examEndTimestamp = record.examEndTimestamp || null;
   state.itemsByProfile = record.itemsByProfile;
 
   // A saved exam from an earlier release may not contain profiles added by
@@ -131,6 +139,10 @@ function tryResumeExamSession(email){
       // them as single legacy-expression programs without invalidating the
       // student's existing expression state or score.
       ensureProgramEnvelope(item);
+      if(typeof item.flagged!=='boolean') item.flagged=false;
+      if(typeof item.examOmitted!=='boolean') item.examOmitted=false;
+      if(!Array.isArray(item.examActionLog)) item.examActionLog=[];
+      if(item.lockedAt===undefined) item.lockedAt=item.checked ? (record.savedAt||null) : null;
       item._bindings = null;
       item._feedbackAnimated = false;
       if(item.trace) item.trace.forEach(t=>{ t._flashed = false; t._entered = false; });
@@ -138,6 +150,13 @@ function tryResumeExamSession(email){
   });
 
   itemPaginationHandlerAttached = false;
+
+  if(state.examSubmitted){
+    state.screen='done';
+    render();
+    return true;
+  }
+
   render();
 
   // Resume the countdown from wherever its original deadline left off —
@@ -146,12 +165,9 @@ function tryResumeExamSession(email){
     ? Math.max(0, Math.round((record.examEndTimestamp - Date.now())/1000))
     : 0;
   if(remaining <= 0){
-    // Time ran out while the student was away. End the exam the same way a
-    // live countdown reaching zero would; nothing is left to resume, so
-    // the saved record is cleared.
-    clearExamProgress(email);
-    state.screen = 'done';
-    render();
+    // Time ran out while the student was away. Preserve and submit the exact
+    // restored attempt instead of deleting its audit/progress record.
+    submitExam(true);
   } else {
     startTimer(remaining);
   }

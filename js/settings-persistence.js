@@ -16,21 +16,39 @@
 
 const APP_SETTINGS_KEY = 'precedifyAppSettings';
 
+function normalizeAppSettings(value){
+  const normalized=cloneDefaultAppSettings();
+  if(!value||typeof value!=='object') return normalized;
+  if(value.mode==='practice'||value.mode==='exam') normalized.mode=value.mode;
+  if(typeof value.timerMinutes==='number'&&value.timerMinutes>=1&&value.timerMinutes<=999){
+    normalized.timerMinutes=Math.round(value.timerMinutes);
+  }
+  const exam=value.exam&&typeof value.exam==='object'?value.exam:{};
+  ['allowUndo','allowReviewFlags','showNeutralGuidance','showScoresDuringExam'].forEach(key=>{
+    if(typeof exam[key]==='boolean') normalized.exam[key]=exam[key];
+  });
+  if(exam.feedbackRelease==='after-submit'||exam.feedbackRelease==='never'){
+    normalized.exam.feedbackRelease=exam.feedbackRelease;
+  }
+  // Assessment integrity invariants cannot be relaxed by stale/tampered data.
+  normalized.exam.showCorrectSolution=false;
+  normalized.exam.lockItemAfterCheck=true;
+  normalized.exam.autoSubmitOnTimeout=true;
+  normalized.schemaVersion=DEFAULT_APP_SETTINGS.schemaVersion;
+  return normalized;
+}
+
 function loadPersistedAppSettings(){
   try{
     const raw = localStorage.getItem(APP_SETTINGS_KEY);
-    if(!raw) return;
-    const saved = JSON.parse(raw);
-    if(saved && (saved.mode==='practice' || saved.mode==='exam')) appSettings.mode = saved.mode;
-    if(saved && typeof saved.timerMinutes==='number' && saved.timerMinutes>=1 && saved.timerMinutes<=999){
-      appSettings.timerMinutes = saved.timerMinutes;
-    }
+    appSettings=normalizeAppSettings(raw?JSON.parse(raw):null);
   }catch(e){ /* ignore malformed/unavailable storage — keep in-code defaults */ }
 }
 
 function savePersistedAppSettings(){
   try{
-    localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify({mode: appSettings.mode, timerMinutes: appSettings.timerMinutes}));
+    appSettings=normalizeAppSettings(appSettings);
+    localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings));
   }catch(e){ /* storage full/unavailable — silently skip */ }
 }
 
@@ -50,4 +68,25 @@ function clearAllExamProgressEverywhere(){
     toRemove.forEach(k=>localStorage.removeItem(k));
     return toRemove.length;
   }catch(e){ return 0; }
+}
+
+function resetPersistedAppSettings(){
+  try{ localStorage.removeItem(APP_SETTINGS_KEY); }catch(e){ /* ignore */ }
+  appSettings=cloneDefaultAppSettings();
+  return true;
+}
+
+function clearAllPrecedifyLocalData(){
+  let removed=0;
+  try{
+    const keys=[];
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);
+      if(key&&(key==='precedifyLogin'||key===APP_SETTINGS_KEY
+        ||key.indexOf('precedifyExamProgress:')===0)) keys.push(key);
+    }
+    keys.forEach(key=>{localStorage.removeItem(key);removed++;});
+  }catch(e){ /* return whatever was removed before the failure */ }
+  appSettings=cloneDefaultAppSettings();
+  return removed;
 }

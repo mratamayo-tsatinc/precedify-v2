@@ -45,21 +45,23 @@ function renderDeclarationStatement(ctx){
     statementNumber:statementIndex+1,
     continuationStyle:true,
     interactive:isActive && !runtime.checked,
-    revealCorrectness:runtime.checked,
+    revealCorrectness:runtime.checked&&state.mode!=='exam',
     isFullyResolved:()=>declarationInitializerResolved(statement),
     renderEquals:ready=>renderDeclarationEquals(statement,ready),
     renderTrailingActions:()=>isActive
-      ? renderInlineEvaluationActions({canUndo:canUndoProgram(item)})
+      ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)})
       : renderCollapseStatementAction(statement,statementIndex)
   }));
 
   if(isActive){
     const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
     const ready = declarationInitializerResolved(statement);
-    card.appendChild(renderContextHelp(unresolved
-      ? 'Substitute the initialized value from program memory before evaluating this initializer.'
-      : (ready ? `The initializer is resolved. Click = to assign it to ${statement.binding.name}.`
-        : 'Evaluate the highlighted operator.')));
+    if(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance){
+      card.appendChild(renderContextHelp(unresolved
+        ? 'Substitute the initialized value from program memory before evaluating this initializer.'
+        : (ready ? `The initializer is resolved. Click = to assign it to ${statement.binding.name}.`
+          : 'Evaluate the highlighted operator.')));
+    }
     const canReset = state.mode==='practice' && (program.cursor>0 || runtime.trace.length>0);
     const resetControl=renderItemResetControl(canReset);
     if(resetControl) card.appendChild(resetControl);

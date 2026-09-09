@@ -47,6 +47,14 @@ function render(){
   const container = document.getElementById('app');
   const expressionScrollPositions=captureExpressionScrollPositions(container);
   container.innerHTML = '';
+  if(state.screen==='done'){
+    renderDone(container);
+    const pagination=document.getElementById('itemPaginationContainer');
+    if(pagination) pagination.style.display='none';
+    if(typeof syncFeedbackDrawerForItem==='function') syncFeedbackDrawerForItem(null);
+    if(typeof renderVariableFinalFloat==='function') renderVariableFinalFloat(null);
+    return;
+  }
   renderProgramItem(container, currentItem());
   // A click rebuilds #app, but the student's horizontal reading position is
   // part of the current work context. Restore it before connector geometry is
@@ -127,6 +135,13 @@ function syncGlobalHeaderUI(){
   if(timerContainer){
     timerContainer.style.display = (timerIntervalId !== null && appSettings.mode === 'exam') ? 'flex' : 'none';
   }
+  const scoreButton=document.getElementById('scoreSummaryBtn');
+  if(scoreButton){
+    const hideExamScore=!examResultsVisible();
+    scoreButton.style.display=hideExamScore?'none':'';
+  }
+  const submitButton=document.getElementById('submitExamBtn');
+  if(submitButton) submitButton.style.display=(state.mode==='exam'&&state.screen==='session'&&!state.examSubmitted)?'inline-flex':'none';
 }
 
 // appSettings (mode/timerMinutes) is persisted globally, not per-user (see

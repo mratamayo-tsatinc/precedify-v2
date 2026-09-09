@@ -70,6 +70,20 @@ function renderItemResetControl(show){
     h('button',{class:'item-reset-button',type:'button',onclick:handleReset},'Reset item'));
 }
 
+function renderExamItemBar(item){
+  if(state.mode!=='exam'||state.examSubmitted) return null;
+  const status=item.checked?'Answer locked':(item.flagged?'Flagged for review':(itemHasAttempt(item)?'In progress':'Unattempted'));
+  const controls=[h('span',{class:'exam-item-status'+(item.checked?' locked':item.flagged?' flagged':'')},
+    item.checked?h('i',{class:'fa-solid fa-lock'}):item.flagged?h('i',{class:'fa-solid fa-flag'}):h('i',{class:'fa-regular fa-circle'}),
+    ' ',status)];
+  if(activeExamPolicy().allowReviewFlags&&!item.checked){
+    controls.push(h('button',{class:'exam-flag-btn'+(item.flagged?' active':''),type:'button',onclick:toggleCurrentItemFlag,
+      title:item.flagged?'Remove review flag':'Flag this item for review','aria-pressed':item.flagged?'true':'false'},
+      h('i',{class:'fa-solid fa-flag'}),item.flagged?' Unflag':' Flag'));
+  }
+  return h('div',{class:'exam-item-bar'},...controls);
+}
+
 // Compatibility helper retained for optional plugins that need a standalone
 // source block. Built-in statements now place their authoritative source in
 // the first evaluation row and do not call this helper.
@@ -100,6 +114,8 @@ function programStatementSource(statement,item){
 function renderProgramWorkspaceShell(container,item,program){
   container.appendChild(h('div',{class:'session-bar'},
     h('div',{class:'session-meta'},h('b',{},`Item ${state.itemIndex+1}`),` / ${state.items.length}  ·  ${currentProfile().name}`)));
+  const examBar=renderExamItemBar(item);
+  if(examBar) container.appendChild(examBar);
   const workspace=h('section',{class:'program-workspace','aria-label':'Program execution'});
   const progress=h('div',{class:'program-progress-visual',role:'progressbar',
     'aria-label':`Program statement ${Math.min(program.cursor+1,program.statements.length)} of ${program.statements.length}`,
@@ -228,6 +244,8 @@ function renderSession(container){
     container.appendChild(h('div',{class:'session-bar'},
       h('div',{class:'session-meta'}, h('b',{}, `Item ${state.itemIndex+1}`), ` / ${state.items.length}  ·  ${profile.name}`)
     ));
+    const examBar=renderExamItemBar(item);
+    if(examBar) container.appendChild(examBar);
   }
   const hasInteractiveDeclarations = itemHasInteractiveProgram(item);
   let evaluationHost=container;
@@ -253,10 +271,10 @@ function renderSession(container){
     statementNumber:embeddedProgram?item.program.cursor+1:null,
     continuationStyle:true,
     interactive:true,
-    revealCorrectness:item.checked,
+    revealCorrectness:item.checked&&state.mode!=='exam',
     isFullyResolved:()=>itemFullyResolved(item),
     renderTrailingActions:()=>renderInlineEvaluationActions({
-      canUndo:!item.checked&&canUndoProgram(item),
+      canUndo:canUndoForCurrentMode(item),
       canCheck:!item.checked&&itemFullyResolved(item)
     })
   });
@@ -266,7 +284,8 @@ function renderSession(container){
   const resetControl=renderItemResetControl(canReset);
   if(resetControl) evaluationHost.appendChild(resetControl);
 
-  if(!itemFullyResolved(item) && !item.checked){
+  if(!itemFullyResolved(item) && !item.checked
+    &&(state.mode!=='exam'||activeExamPolicy().showNeutralGuidance)){
     const unresolvedCount = collectUnresolvedFlat(item.workingFlat,[]).length;
     if(unresolvedCount>0){
       evaluationHost.appendChild(renderContextHelp(`Resolve ${unresolvedCount} more highlighted token${unresolvedCount>1?'s':''} (variable, constant, or unary) before operators become active.`));
@@ -276,7 +295,19 @@ function renderSession(container){
   }
 
   // feedback
-  if(item.checked){
+  const examFeedbackDeferred=state.mode==='exam'&&!state.examSubmitted;
+  if(item.checked&&examFeedbackDeferred){
+    container.appendChild(h('div',{class:'exam-answer-recorded'},
+      h('i',{class:'fa-solid fa-lock'}),
+      h('span',{},h('b',{},'Answer recorded and locked.'),' Correctness and score are withheld until the exam is submitted.')));
+    if(typeof clearFeedbackDrawerContent==='function'){
+      try{
+        clearFeedbackDrawerContent();
+        if(typeof hideFeedbackDrawerTab==='function') hideFeedbackDrawerTab();
+        if(typeof closeFeedbackDrawer==='function') closeFeedbackDrawer();
+      }catch(e){ /* no-op */ }
+    }
+  } else if(item.checked){
     const correct = item.wasCorrectFinal;
     // The whole session view is torn down and rebuilt on every render() call
     // (including once per second while answer-key playback is auto-advancing),

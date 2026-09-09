@@ -32,15 +32,12 @@
 //                     Controlled from the global app header (#varFloatToggle
 //                     in index.html), since it's meaningful whether or not
 //                     the panel currently exists on screen.
-//   flyAnimEnabled — whether a newly-committed binding's value travels from
-//                     its origin token in the timeline to its card (true),
-//                     or simply appears in place with the existing one-shot
-//                     colorFlash pulse (false). Default OFF, per spec — the
-//                     un-animated path is not a separate implementation,
-//                     it's a direct call into the ORIGINAL, unmodified
-//                     renderVariableFinalState(item) from var-final-state.js,
-//                     so "no animation" really does mean "exactly the
-//                     current behavior", just inside a floating shell.
+//   flyAnimEnabled — whether a newly-committed binding is carried from its
+//                     origin token to memory by a comet-like travel cue.
+//                     Default OFF. The destination card never travels: its
+//                     value line rolls down in place in BOTH modes, so even
+//                     students who disable travel animation can still see
+//                     that stored data changed.
 //                     Controlled from a small toggle INSIDE the panel's own
 //                     header (see mountVarFinalFloatPanel) rather than the
 //                     global app header — this setting only means anything
@@ -88,6 +85,7 @@ let dragging = false;
 let dragPanelEl = null;
 let dragOffsetX = 0, dragOffsetY = 0;
 let memoryTransferInProgress = false;
+let memoryCometSequence = 0;
 
 // Whether the panel was already showing as of the LAST render — used to
 // tell "just appeared" (toggled on, or first render of the session) apart
@@ -126,12 +124,12 @@ function toggleVarFinalFlyAnim(){
 }
 
 // Reverse direction of the same memory visualization. The semantic action is
-// applied first so its history row and connector can render immediately; the
-// newly rendered value card is then blanked and given a spinner before the
-// browser paints. The stored value flies into that waiting card and is only
-// revealed when it lands.
+// applied first so its history row and connector can render immediately. The
+// expression card itself stays fixed: with travel enabled it waits with a
+// spinner while a comet connects memory to the expression; in either mode,
+// only the value rolls into the destination card.
 function animateVarFinalMemoryToExpression(item, action, applyAction){
-  if(!flyAnimEnabled || !floatVisible || !item || !action
+  if(!floatVisible || !item || !action
     || (action.type!=='substitute'&&action.type!=='reveal-assignment-target')) return false;
   if(memoryTransferInProgress) return true;
 
@@ -161,29 +159,19 @@ function animateVarFinalMemoryToExpression(item, action, applyAction){
 
   memoryTransferInProgress = true;
   const shield = h('div',{class:'var-final-transfer-shield','aria-hidden':'true'});
-  const clone = source.cloneNode(true);
-  clone.removeAttribute('data-token-id');
-  clone.classList.add('var-final-flying','var-final-flying-reverse');
   const sourceRect = source.getBoundingClientRect();
   const sourceValueEl = source.querySelector('.tok-card-body');
-  const sourceValue = sourceValueEl ? sourceValueEl.textContent : '';
-  clone.style.position = 'fixed';
-  clone.style.left = sourceRect.left+'px';
-  clone.style.top = sourceRect.top+'px';
-  clone.style.width = sourceRect.width+'px';
-  clone.style.height = sourceRect.height+'px';
-  clone.style.margin = '0';
-  clone.style.transform = 'none';
+  // If the memory card is itself finishing an outbound value roll, use its
+  // incoming value rather than concatenating the old and new text nodes.
+  const rollingValue = sourceValueEl && sourceValueEl.querySelector('.vf-value-roll-new');
+  const sourceValue = rollingValue ? rollingValue.textContent : (sourceValueEl ? sourceValueEl.textContent : '');
   document.body.appendChild(shield);
-  document.body.appendChild(clone);
-  void clone.getBoundingClientRect();
 
   // render() runs synchronously inside this callback. Consequently the next
   // statements execute before a paint, preventing the resolved value from
   // flashing briefly before it is replaced by the waiting spinner.
   const applied = typeof applyAction==='function' && applyAction();
   if(!applied){
-    clone.remove();
     shield.remove();
     memoryTransferInProgress = false;
     return true;
@@ -194,7 +182,6 @@ function animateVarFinalMemoryToExpression(item, action, applyAction){
     ? renderedDestinations[renderedDestinations.length-1] : null;
   const waitingBody = renderedDestination && renderedDestination.querySelector('.tok-card-body');
   if(!renderedDestination || !waitingBody){
-    clone.remove();
     shield.remove();
     memoryTransferInProgress = false;
     return true;
@@ -203,41 +190,33 @@ function animateVarFinalMemoryToExpression(item, action, applyAction){
   renderedDestination.classList.add('memory-transfer-waiting');
   renderedDestination.setAttribute('aria-busy','true');
   waitingBody.textContent = '';
-  waitingBody.appendChild(h('span',{class:'memory-transfer-spinner','aria-hidden':'true'}));
+  if(flyAnimEnabled){
+    waitingBody.appendChild(h('span',{class:'memory-transfer-spinner','aria-hidden':'true'}));
+  }
   const destinationRect = renderedDestination.getBoundingClientRect();
 
-  const durationMs = flightDurationMs;
-
-  let finished = false;
-  const finish = ()=>{
-    if(finished) return;
-    finished = true;
-    clone.remove();
+  const finishTransfer = ()=>{
     shield.remove();
     memoryTransferInProgress = false;
-    if(renderedDestination.isConnected){
-      waitingBody.textContent = sourceValue;
-      renderedDestination.classList.remove('memory-transfer-waiting');
-      renderedDestination.removeAttribute('aria-busy');
-      renderedDestination.classList.add('tok-card-flash');
-    }
-    // Reconcile the temporary waiting DOM with the semantic history. If this
-    // substitution completed the final expression, this render also starts
-    // its now-unblocked expression-to-memory target flight.
+    // Reconcile the temporary value-roll DOM with semantic history. If this
+    // substitution completed the final expression, the render also starts
+    // its now-unblocked expression-to-memory target transfer.
     if(typeof render==='function') requestAnimationFrame(()=>render());
   };
-  clone.addEventListener('transitionend',finish,{once:true});
-  setTimeout(finish,durationMs+150);
-  requestAnimationFrame(()=>{
-    clone.style.transition =
-      `left ${durationMs}ms cubic-bezier(.22,.72,.22,1), top ${durationMs}ms cubic-bezier(.22,.72,.22,1), `+
-      `width ${durationMs}ms ease, height ${durationMs}ms ease, opacity ${durationMs}ms ease`;
-    clone.style.left = destinationRect.left+'px';
-    clone.style.top = destinationRect.top+'px';
-    clone.style.width = Math.max(destinationRect.width,28)+'px';
-    clone.style.height = destinationRect.height+'px';
-    clone.style.opacity = '0.72';
-  });
+  const rollIntoExpression = ()=>{
+    renderedDestination.classList.remove('memory-transfer-waiting');
+    renderedDestination.removeAttribute('aria-busy');
+    renderedDestination.classList.add('tok-card-flash');
+    rollVarFinalCardValue(renderedDestination,sourceValue,finishTransfer,'');
+  };
+  if(flyAnimEnabled){
+    const color=bindingIdentityColor(named.name,named.kind==='constant'?'constant':'variable');
+    runVarFinalComet(sourceRect,destinationRect,color,rollIntoExpression);
+  } else {
+    // No comet or spinner, but retain the value-entry roll requested for the
+    // global animation-off mode.
+    rollIntoExpression();
+  }
   return true;
 }
 function syncVarFinalFloatToggleUI(){
@@ -267,18 +246,9 @@ function renderVariableFinalFloat(item){
   const isAppearing = !floatWasMounted;
   floatWasMounted = true;
 
-  if(!flyAnimEnabled){
-    // "No animation" mode is not a separate code path — it's literally the
-    // existing, unmodified section from var-final-state.js, just mounted
-    // inside the floating shell instead of appended inline. Whatever pulse
-    // behavior that function already implements (isFlash) is exactly what
-    // plays here.
-    const section = renderVariableFinalState(item);
-    if(!section) return;
-    mountVarFinalFloatPanel(section, null, isAppearing);
-    return;
-  }
-
+  // Both preference modes share this builder. It deliberately holds the old
+  // value in the real memory card until runVarFinalFlights either completes
+  // the comet or (with travel disabled) immediately starts the value roll.
   const built = buildAnimatedVarFinalSection(item);
   if(!built) return;
   mountVarFinalFloatPanel(built.section, built.flights, isAppearing);
@@ -314,8 +284,12 @@ function buildAnimatedVarFinalSection(item){
     // Keep that target pending until the inbound flight lands, then let the
     // follow-up render begin the outbound final-value flight.
     const postponeTargetFlight = memoryTransferInProgress && b.kind==='target';
-    const justCommitted = live.committed && !b._flashed && !postponeTargetFlight;
-    if(justCommitted) b._flashed = true;
+    // Static legacy inputs are already present when an item opens; they have
+    // no old→new storage update to animate. Preserve their original one-shot
+    // arrival pulse without manufacturing a same-value roll or comet.
+    const staticArrival = b.trigger==='static' && live.committed && !b._flashed;
+    const justCommitted = b.trigger!=='static' && live.committed && !b._flashed && !postponeTargetFlight;
+    if(justCommitted || staticArrival) b._flashed = true;
 
     let hasValue, displayValue, flashColor;
     if(justCommitted || (postponeTargetFlight && live.committed)){
@@ -340,7 +314,7 @@ function buildAnimatedVarFinalSection(item){
       value: hasValue ? displayValue : '—',
       kind: b.kind==='program-constant' ? 'constant' : 'variable',
       color: flashColor,
-      isFlash: false
+      isFlash: staticArrival
     });
     row.appendChild(card);
 
@@ -577,6 +551,12 @@ function runVarFinalFlights(flights){
       setTimeout(()=>runVarFinalFlights([delayed]),f.delayMs);
       return;
     }
+    // Disabling global travel removes only the source-to-memory comet. The
+    // value-only roll in the stationary destination card remains mandatory.
+    if(!flyAnimEnabled){
+      settleVarFinalFlight(f, f.color);
+      return;
+    }
     const destRect = f.cardEl.getBoundingClientRect();
     const originEl = findVarFinalOriginEl(f.originId, f.statementId);
     if(!originEl){
@@ -588,7 +568,7 @@ function runVarFinalFlights(flights){
       settleVarFinalFlight(f, null);
       return;
     }
-    spawnVarFinalFlyingToken(f, originEl.getBoundingClientRect(), destRect);
+    spawnVarFinalComet(f, originEl.getBoundingClientRect(), destRect);
   });
 }
 
@@ -607,57 +587,176 @@ function findVarFinalOriginEl(id, statementId){
   return matches.length ? matches[matches.length-1] : null;
 }
 
-function spawnVarFinalFlyingToken(f, originRect, destRect){
-  const clone = renderValueCard({id:null, name:f.name, value:f.value, kind:f.kind || 'variable', color:f.color, isFlash:false});
-  clone.classList.add('var-final-flying');
-  clone.style.position = 'fixed';
-  clone.style.left = originRect.left+'px';
-  clone.style.top = originRect.top+'px';
-  clone.style.width = originRect.width+'px';
-  clone.style.height = originRect.height+'px';
-  clone.style.margin = '0';
-  clone.style.transform = 'none';
-  document.body.appendChild(clone);
-
-  // Force a layout read before enabling the transition, so the browser
-  // registers this START position as the resting state before we move it —
-  // otherwise the jump to the end position would happen instantly, with no
-  // visible motion (same "measure before animating" concern as
-  // connector-lines.js's connector-measuring class, just the reverse: here
-  // we need the FIRST frame to actually stick, not be skipped).
-  void clone.getBoundingClientRect();
-
-  const durationMs = flightDurationMs;
-  const opacityDelayMs = Math.round(durationMs * 0.6);
-  clone.style.transition =
-    `left ${durationMs}ms cubic-bezier(.3,.7,.2,1), top ${durationMs}ms cubic-bezier(.3,.7,.2,1), `+
-    `width ${durationMs}ms ease, height ${durationMs}ms ease, opacity ${durationMs}ms ease ${opacityDelayMs}ms`;
-  clone.style.left = destRect.left+'px';
-  clone.style.top = destRect.top+'px';
-  clone.style.width = destRect.width+'px';
-  clone.style.height = destRect.height+'px';
-
-  let done = false;
-  const finish = ()=>{
-    if(done) return;
-    done = true;
-    clone.remove();
-    settleVarFinalFlight(f, f.color);
-  };
-  clone.addEventListener('transitionend', finish, {once:true});
-  setTimeout(finish, durationMs + 150); // safety net if transitionend never fires (e.g. tab backgrounded)
+function spawnVarFinalComet(f, originRect, destRect){
+  const kind=f.kind==='constant'?'constant':'variable';
+  const color=bindingIdentityColor(f.name,kind);
+  runVarFinalComet(originRect,destRect,color,()=>settleVarFinalFlight(f,f.color));
 }
 
-// Reveals the real value on the actual destination card once its flight
-// (or the no-origin fallback) completes, with the same one-shot pulse the
-// rest of the app uses for "something just resolved" — see .tok-card-flash
-// / colorFlash in styles.css.
+// Builds one stable, shallow cubic curve. Choosing the candidate bend with
+// more viewport clearance keeps the transient path on-screen, while using
+// the same physical midpoint candidate means A→B and B→A follow the same
+// route in reverse rather than bowing to opposite sides.
+function varFinalCometCurve(start,end,viewportWidth,viewportHeight){
+  const dx=end.x-start.x,dy=end.y-start.y;
+  const distance=Math.max(1,Math.hypot(dx,dy));
+  const nx=-dy/distance,ny=dx/distance;
+  const bow=Math.min(64,Math.max(22,distance*.16));
+  const mid={x:(start.x+end.x)/2,y:(start.y+end.y)/2};
+  const candidates=[
+    {x:mid.x+nx*bow,y:mid.y+ny*bow},
+    {x:mid.x-nx*bow,y:mid.y-ny*bow}
+  ];
+  const clearance=p=>Math.min(p.x,p.y,viewportWidth-p.x,viewportHeight-p.y);
+  const firstClearance=clearance(candidates[0]);
+  const secondClearance=clearance(candidates[1]);
+  const bend=firstClearance===secondClearance
+    ? (candidates[0].y>=candidates[1].y?candidates[0]:candidates[1])
+    : (firstClearance>secondClearance?candidates[0]:candidates[1]);
+  const offset={x:bend.x-mid.x,y:bend.y-mid.y};
+  const c1={x:start.x+dx*.28+offset.x,y:start.y+dy*.28+offset.y};
+  const c2={x:start.x+dx*.72+offset.x,y:start.y+dy*.72+offset.y};
+  return {
+    c1,c2,
+    d:`M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`
+  };
+}
+
+// Shared source→destination travel cue used in both directions. The comet
+// head and its source-anchored fading trail are sampled from the exact same
+// SVG cubic path, matching the visual vocabulary of connector-lines.js.
+function runVarFinalComet(originRect,destRect,color,onArrival){
+  const start={x:originRect.left+originRect.width/2,y:originRect.top+originRect.height/2};
+  const end={x:destRect.left+destRect.width/2,y:destRect.top+destRect.height/2};
+  const svgNS='http://www.w3.org/2000/svg';
+  const viewportWidth=Math.max(1,window.innerWidth||document.documentElement.clientWidth||1);
+  const viewportHeight=Math.max(1,window.innerHeight||document.documentElement.clientHeight||1);
+  const curve=varFinalCometCurve(start,end,viewportWidth,viewportHeight);
+  const gradientId='var-final-comet-gradient-'+(++memoryCometSequence);
+  const comet=document.createElementNS(svgNS,'svg');
+  comet.setAttribute('class','var-final-comet');
+  comet.setAttribute('width',String(viewportWidth));
+  comet.setAttribute('height',String(viewportHeight));
+  comet.setAttribute('viewBox',`0 0 ${viewportWidth} ${viewportHeight}`);
+  comet.setAttribute('aria-hidden','true');
+  comet.style.color=color;
+
+  const defs=document.createElementNS(svgNS,'defs');
+  const gradient=document.createElementNS(svgNS,'linearGradient');
+  gradient.setAttribute('id',gradientId);
+  gradient.setAttribute('gradientUnits','userSpaceOnUse');
+  gradient.setAttribute('x1',String(start.x));
+  gradient.setAttribute('y1',String(start.y));
+  gradient.setAttribute('x2',String(start.x));
+  gradient.setAttribute('y2',String(start.y));
+  const fadeStop=document.createElementNS(svgNS,'stop');
+  fadeStop.setAttribute('offset','0%');
+  fadeStop.setAttribute('stop-color',color);
+  fadeStop.setAttribute('stop-opacity','0');
+  const glowStop=document.createElementNS(svgNS,'stop');
+  glowStop.setAttribute('offset','100%');
+  glowStop.setAttribute('stop-color',color);
+  glowStop.setAttribute('stop-opacity','1');
+  gradient.appendChild(fadeStop);
+  gradient.appendChild(glowStop);
+  defs.appendChild(gradient);
+
+  const trail=document.createElementNS(svgNS,'path');
+  trail.setAttribute('class','var-final-comet-trail');
+  trail.setAttribute('d',curve.d);
+  trail.setAttribute('fill','none');
+  trail.setAttribute('stroke',`url(#${gradientId})`);
+  trail.setAttribute('stroke-linecap','round');
+  const head=document.createElementNS(svgNS,'circle');
+  head.setAttribute('class','var-final-comet-head');
+  head.setAttribute('r','4.5');
+  head.setAttribute('fill',color);
+  head.setAttribute('cx',String(start.x));
+  head.setAttribute('cy',String(start.y));
+  comet.appendChild(defs);
+  comet.appendChild(trail);
+  comet.appendChild(head);
+  document.body.appendChild(comet);
+
+  const pathLength=trail.getTotalLength();
+  trail.style.strokeDasharray=`0 ${pathLength}`;
+
+  const durationMs=flightDurationMs;
+  const started=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
+  let done=false;
+  const finish=()=>{
+    if(done) return;
+    done=true;
+    comet.remove();
+    if(typeof onArrival==='function') onArrival();
+  };
+  const frame=(now)=>{
+    if(done) return;
+    const elapsed=Math.max(0,now-started);
+    const raw=Math.min(1,elapsed/durationMs);
+    // Smoothstep eases both ends without the destination snap produced by
+    // the old CSS card transition.
+    const p=raw*raw*(3-2*raw);
+    const travelled=pathLength*p;
+    const point=trail.getPointAtLength(travelled);
+    trail.style.strokeDasharray=`${travelled} ${pathLength}`;
+    gradient.setAttribute('x2',String(point.x));
+    gradient.setAttribute('y2',String(point.y));
+    head.setAttribute('cx',String(point.x));
+    head.setAttribute('cy',String(point.y));
+    if(raw>=1) finish();
+    else requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+  setTimeout(finish,durationMs+180); // safety net for a backgrounded tab
+}
+
+// The memory card itself remains fixed. Only its value line rolls downward:
+// the previous value exits below while the replacement enters from above.
+// This transition intentionally does not depend on flyAnimEnabled.
+function rollVarFinalCardValue(cardEl,value,onComplete,oldTextOverride){
+  const bodyEl=cardEl&&cardEl.querySelector('.tok-card-body');
+  if(!bodyEl){
+    if(typeof onComplete==='function') onComplete();
+    return;
+  }
+  const nextText=formatValue(value);
+  const oldText=oldTextOverride===undefined ? bodyEl.textContent : oldTextOverride;
+  bodyEl.textContent='';
+  // The rolling children are absolutely positioned and therefore cannot
+  // size a compact inline expression card. Reserve enough width for the
+  // longer value so multi-digit replacements are never clipped mid-roll.
+  bodyEl.style.minWidth=Math.max(1,String(oldText).length,String(nextText).length)+'ch';
+  bodyEl.classList.add('vf-value-roll');
+  const oldValue=h('span',{class:'vf-value-roll-old'},oldText);
+  const newValue=h('span',{class:'vf-value-roll-new'},nextText);
+  bodyEl.appendChild(oldValue);
+  bodyEl.appendChild(newValue);
+  void bodyEl.getBoundingClientRect();
+  requestAnimationFrame(()=>bodyEl.classList.add('is-rolling'));
+  let finished=false;
+  const finish=()=>{
+    if(finished) return;
+    finished=true;
+    if(bodyEl.isConnected){
+      bodyEl.textContent=nextText;
+      bodyEl.classList.remove('vf-value-roll','is-rolling');
+      bodyEl.style.removeProperty('min-width');
+    }
+    if(typeof onComplete==='function') onComplete();
+  };
+  newValue.addEventListener('transitionend',finish,{once:true});
+  setTimeout(finish,560);
+}
+
 function settleVarFinalFlight(f, color){
-  const bodyEl = f.cardEl.querySelector('.tok-card-body');
-  if(bodyEl) bodyEl.textContent = formatValue(f.value);
+  rollVarFinalCardValue(f.cardEl,f.value);
   if(color && f.cardEl.style && typeof f.cardEl.style.setProperty==='function'){
     f.cardEl.style.setProperty('--step-color',color);
   }
+  const valueText=formatValue(f.value);
+  f.cardEl.setAttribute('title',`${f.name} = ${valueText}`);
+  f.cardEl.setAttribute('aria-label',`${f.kind==='constant'?'constant':'variable'} ${f.name}, value ${valueText}`);
   f.cardEl.classList.add('tok-card-flash');
   if(f.binding) f.binding._lastDisplayValue=f.value;
   if(f.mergeRuntime) f.mergeRuntime.assignmentMergePending=false;
@@ -734,8 +833,22 @@ function ensureVarFinalFloatStyles(){
 .var-final-float .var-final-panel{ margin-top:0; padding-top:0; border-top:none; }
 .var-final-float .var-final-title{ display:none; }
 @keyframes var-final-float-in{ from{ opacity:0; transform:translateY(-6px); } to{ opacity:1; transform:translateY(0); } }
-.var-final-flying{ pointer-events:none; z-index:920; box-shadow:0 6px 18px rgba(0,0,0,0.4); }
-.var-final-flying-reverse{ z-index:922; }
+.var-final-comet{ position:fixed; inset:0; z-index:920; pointer-events:none; overflow:visible; }
+.var-final-comet-trail{
+  stroke-width:3px; opacity:.86; filter:drop-shadow(0 0 4px currentColor);
+}
+.var-final-comet-head{
+  filter:drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor);
+}
+.vf-value-roll{ position:relative; overflow:hidden; height:1em; width:100%; }
+.vf-value-roll-old,.vf-value-roll-new{
+  position:absolute; inset:0; display:block; text-align:center;
+  transition:transform 420ms cubic-bezier(.22,.72,.22,1),opacity 420ms ease;
+}
+.vf-value-roll-old{ transform:translateY(0); }
+.vf-value-roll-new{ transform:translateY(-115%); opacity:.45; }
+.vf-value-roll.is-rolling .vf-value-roll-old{ transform:translateY(115%); opacity:.35; }
+.vf-value-roll.is-rolling .vf-value-roll-new{ transform:translateY(0); opacity:1; }
 .var-final-transfer-shield{ position:fixed; inset:0; z-index:910; cursor:wait; background:transparent; }
 .memory-transfer-waiting .tok-card-body{
   min-height:1em; display:flex; align-items:center; justify-content:center;

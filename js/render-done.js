@@ -1,4 +1,37 @@
 function renderDone(container){
+  if(state.mode==='exam'&&state.examSubmitted){
+    const policy=activeExamPolicy();
+    const summary=examAttemptSummary();
+    const card=h('div',{class:'card exam-submission-card'});
+    card.appendChild(h('div',{class:'summary-hero'},
+      h('div',{class:'exam-submitted-icon'},h('i',{class:'fa-solid fa-circle-check'})),
+      h('div',{class:'summary-score'},'Exam submitted'),
+      h('div',{class:'summary-sub'},`${summary.answered} answered · ${summary.unattempted+summary.inProgress} not submitted as answers`)
+    ));
+    if(policy.feedbackRelease==='after-submit'){
+      const total=computeGrandTotalScore();
+      card.appendChild(h('div',{class:'exam-result-total'},
+        h('span',{},'Total score'),h('strong',{},`${total.earned} / ${total.max}`)));
+      const list=h('div',{class:'summary-list exam-profile-results'});
+      PROFILES.forEach(profile=>{
+        const items=state.itemsByProfile[profile.id]||[];
+        const earned=roundPoints(items.reduce((sum,item)=>sum+(item.points||0),0));
+        const answered=items.filter(item=>item.checked).length;
+        const correct=items.filter(item=>item.wasCorrectFinal).length;
+        list.appendChild(h('div',{class:'sumrow'},
+          h('span',{class:'si'},profile.name),
+          h('span',{class:'sr'},`${earned}/${items.length*profile.pointsPerItem} · ${correct}/${answered} correct`)));
+      });
+      card.appendChild(list);
+    } else {
+      card.appendChild(h('div',{class:'exam-results-withheld'},h('i',{class:'fa-solid fa-lock'}),
+        ' Your attempt is saved. Results are not configured for release on this device.'));
+    }
+    card.appendChild(h('button',{class:'start-btn',onclick:logout,style:'margin-top:26px;'},
+      h('i',{class:'fa-solid fa-right-from-bracket'}),' Log out'));
+    container.appendChild(card);
+    return;
+  }
   const total = state.items.length;
   // Session total is the raw sum of each item's earned/possible points from
   // whichever ITEM_SCORE_MODELS policy is configured (SCORING_CONFIG.model) —
