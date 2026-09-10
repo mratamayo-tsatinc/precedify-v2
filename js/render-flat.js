@@ -26,6 +26,8 @@ function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
     if(op.resolved){
       const col = colorMap.get(op.id);
       const isFlash = flashId!=null && op.id===flashId;
+      const mutationCard=renderResolvedUnaryMutationCard(op,col,isFlash);
+      if(mutationCard) return mutationCard;
       const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': op.id};
       if(col) attrs.style = `color:${col};`;
       return h('span',attrs, formatValue(op.resultValue));
@@ -149,6 +151,8 @@ function renderStaticFlatOperand(op, colorMap, flashId, pending){
     if(op.resolved){
       const col = colorMap.get(op.id);
       const isFlash = flashId!=null && op.id===flashId;
+      const mutationCard=renderResolvedUnaryMutationCard(op,col,isFlash);
+      if(mutationCard) return mutationCard;
       const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': op.id};
       if(col) attrs.style = `color:${col};`;
       return h('span',attrs, formatValue(op.resultValue));

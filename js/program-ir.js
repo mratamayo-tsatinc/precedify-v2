@@ -58,6 +58,23 @@ function assignmentStatement(spec){
   };
 }
 
+function unaryUpdateStatement(spec){
+  spec = spec || {};
+  if(!spec.target) throw new Error('Unary update statement requires a target');
+  if(spec.operator!=='++'&&spec.operator!=='--'){
+    throw new Error(`Unsupported unary update operator '${spec.operator}'`);
+  }
+  const form=spec.form==='prefix'?'prefix':'postfix';
+  return {
+    id:spec.id||null,
+    kind:'unary-update',
+    target:spec.target,
+    operator:spec.operator,
+    form,
+    sourceSpan:spec.sourceSpan||null
+  };
+}
+
 function expressionStatement(expression, opts){
   opts = opts || {};
   if(!expression) throw new Error('Expression statement requires an expression');

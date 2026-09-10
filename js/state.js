@@ -33,7 +33,7 @@ const DEFAULT_APP_SETTINGS = Object.freeze({
   schemaVersion: 4,
   // local-configurable | state-only. This deployment switch is intentionally
   // read only: persisted browser data can never override it.
-  settingsPolicy: 'local-configurable',
+  settingsPolicy: 'state-only',
   mode: 'practice',
   timerMinutes: 15,
   practice: Object.freeze({
@@ -286,7 +286,8 @@ function examCurrentCorrectScoredChecks(item){
     ? item.trace.filter(step=>step.action==='EVALUATE'&&step.wasCorrect===true).length : 0;
   if(item.program&&item.program.scoreAssignments){
     item.program.statements.forEach(statement=>{
-      if(!['declaration','assignment'].includes(statement.kind)||!statement.runtime) return;
+      const plugin=statementPluginFor(statement);
+      if(!plugin||!plugin.scoresCommit||!statement.runtime) return;
       correct+=statement.runtime.trace.filter(step=>step.action==='EVALUATE'&&step.wasCorrect===true).length;
       if(statement.runtime.checked&&statement.runtime.wasCorrectAssignment===true) correct++;
     });
@@ -301,7 +302,8 @@ function examCanonicalScoredCheckCount(item){
   total+=finalSteps.filter(step=>step.action==='EVALUATE').length;
   if(item&&item.program&&item.program.scoreAssignments){
     item.program.statements.forEach(statement=>{
-      if(!['declaration','assignment'].includes(statement.kind)||!statement.runtime) return;
+      const plugin=statementPluginFor(statement);
+      if(!plugin||!plugin.scoresCommit||!statement.runtime) return;
       const canonical=statement.runtime.canonicalTrace&&Array.isArray(statement.runtime.canonicalTrace.steps)
         ? statement.runtime.canonicalTrace.steps : [];
       total+=canonical.filter(step=>step.action==='EVALUATE').length+1;
@@ -742,7 +744,8 @@ function checkExpressionItem(item){
   let priorTotalChecks = 0;
   if(item.program && item.program.scoreAssignments){
     item.program.statements.forEach(statement=>{
-      if(!['declaration','assignment'].includes(statement.kind) || !statement.runtime || !statement.runtime.checked) return;
+      const plugin=statementPluginFor(statement);
+      if(!plugin||!plugin.scoresCommit||!statement.runtime||!statement.runtime.checked) return;
       priorCorrectChecks += statement.runtime.correctSteps;
       priorTotalChecks += statement.runtime.totalOpSteps;
       priorTotalChecks += 1; // the declaration's explicit `=` assignment
@@ -771,8 +774,10 @@ function checkExpressionItem(item){
     const attemptedEvaluations=item.examActionLog.filter(entry=>entry.type==='evaluate');
     if(attemptedEvaluations.length){
       const assignmentStatements=item.program&&item.program.scoreAssignments
-        ? item.program.statements.filter(statement=>['declaration','assignment'].includes(statement.kind)
-          &&statement.runtime&&statement.runtime.checked) : [];
+        ? item.program.statements.filter(statement=>{
+          const plugin=statementPluginFor(statement);
+          return !!(plugin&&plugin.scoresCommit&&statement.runtime&&statement.runtime.checked);
+        }) : [];
       scoringFacts.correctSteps=attemptedEvaluations.filter(entry=>entry.wasCorrect===true).length
         +assignmentStatements.filter(statement=>statement.runtime.wasCorrectAssignment).length;
       scoringFacts.totalOpSteps=attemptedEvaluations.length+assignmentStatements.length;

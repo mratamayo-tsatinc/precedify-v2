@@ -111,6 +111,53 @@ function buildAssignmentLessonStatements(item,lesson,memory){
   });
 }
 
+function buildUnaryUpdateStatementRuntime(target,operator,form,memory,index){
+  const expectedBefore=memory[target];
+  const expectedAfter=expectedBefore+(operator==='++'?1:-1);
+  const tree=makeUnary(operator,form,makeNamed('variable',target,expectedBefore));
+  const statement=unaryUpdateStatement({
+    id:`unary-update-${index+1}`,target,operator,form
+  });
+  statement.runtime=buildDeclarationRuntime(tree,expectedAfter);
+  statement.runtime.expectedBefore=expectedBefore;
+  statement.runtime.expectedAfter=expectedAfter;
+  statement.runtime.beforeMemory=null;
+  statement.runtime.beforeValue=null;
+  statement.runtime.assignedValue=null;
+
+  // The generic unary engine correctly models postfix expression values as
+  // the original value. In a standalone statement that value is discarded;
+  // the observable result is the updated memory value, so canonical playback
+  // normalizes only this statement-local final state to that stored value.
+  const canonical=statement.runtime.canonicalTrace;
+  const finalTree=canonical&&canonical.treeStates&&canonical.treeStates[canonical.treeStates.length-1];
+  const finalStep=canonical&&canonical.steps&&canonical.steps[canonical.steps.length-1];
+  if(finalTree&&finalTree.kind==='unary') finalTree.resultValue=expectedAfter;
+  if(finalStep&&finalStep.action==='UNARY'){
+    finalStep.result=expectedAfter;
+    finalStep.expressionAfter=renderString(finalTree);
+  }
+  statement.dependencies=[target];
+  memory[target]=expectedAfter;
+  return statement;
+}
+
+function buildUnaryUpdateLessonStatements(item,lesson,memory){
+  const variables=item.decls.filter(declaration=>declaration.kind==='variable');
+  const first=variables[0],second=variables[1]||variables[0];
+  if(!first) return [];
+  const specs=lesson==='standalone-sequence'
+    ? [
+        {target:first.name,operator:'++',form:'postfix'},
+        {target:second.name,operator:'--',form:'prefix'},
+        {target:first.name,operator:'++',form:'prefix'},
+        {target:second.name,operator:'--',form:'postfix'}
+      ]
+    : [];
+  return specs.map((spec,index)=>buildUnaryUpdateStatementRuntime(
+    spec.target,spec.operator,spec.form,memory,index));
+}
+
 function applyProgramMemoryToTree(node,memory){
   if(!node) return;
   if(node.kind==='variable'||node.kind==='constant'){
@@ -142,8 +189,10 @@ function buildGeneratedProgram(item, profile){
   }
 
   const isAssignmentLesson=!!cfg.assignmentLesson;
+  const isUnaryUpdateLesson=!!cfg.unaryUpdateLesson;
+  const isProgramLesson=isAssignmentLesson||isUnaryUpdateLesson;
   const statements = item.decls.map((decl, index)=>{
-    const initializerTree = isAssignmentLesson ? makeLiteral(decl.value) : declarationInitializerTree(item.decls, index);
+    const initializerTree = isProgramLesson ? makeLiteral(decl.value) : declarationInitializerTree(item.decls, index);
     const statement = declarationStatement({
       id:`declaration-${index+1}`,
       name:decl.name,
@@ -164,6 +213,13 @@ function buildGeneratedProgram(item, profile){
     rebuildFinalExpressionForMemory(item,expectedMemory);
   }
 
+  if(isUnaryUpdateLesson){
+    const expectedMemory={};
+    item.decls.forEach(decl=>{expectedMemory[decl.name]=decl.value;});
+    statements.push(...buildUnaryUpdateLessonStatements(item,cfg.unaryUpdateLesson,expectedMemory));
+    rebuildFinalExpressionForMemory(item,expectedMemory);
+  }
+
   statements.push({
     id:'final-expression',
     kind:'legacy-expression',
@@ -174,7 +230,7 @@ function buildGeneratedProgram(item, profile){
     id:`${profile.id}-program`,
     language:(typeof state === 'object' && state && state.language) || 'java'
   });
-  item.program.mode = isAssignmentLesson ? 'interactive-program' : 'interactive-declarations';
+  item.program.mode = isProgramLesson ? 'interactive-program' : 'interactive-declarations';
   item.program.scoreAssignments = cfg.scoreAssignments !== false;
   return item.program;
 }

@@ -60,6 +60,7 @@ function applyAssignmentOperator(operator,currentValue,rhsValue){
 
 registerStatementPlugin({
   kind:'assignment',
+  scoresCommit:true,
 
   classifyRejectedAction(ctx){
     if(!ctx.action||ctx.action.type!=='commit-assignment') return null;

@@ -69,6 +69,7 @@ function strictPracticeInvalidMessage(item){
   const labels={
     'operands-unresolved':'This operation cannot execute because one or both operand values are still unavailable.',
     'unary-operand-unresolved':'This unary operation cannot execute until its variable value is available.',
+    'unary-target-unavailable':'This unary statement cannot execute because its target variable is not available in program memory.',
     'initializer-unresolved':'The declaration cannot assign a value until its initializer has been fully derived.',
     'assignment-value-unresolved':'The assignment cannot execute until its right-side expression has been fully derived.',
     'assignment-target-unread':'The compound assignment cannot execute until the variable’s current value is available.',
@@ -77,9 +78,27 @@ function strictPracticeInvalidMessage(item){
   return `${labels[item.practiceInvalidExecution.reason]||'This action cannot execute in the current program state.'} Use Undo to return to the executable state.`;
 }
 
-function renderInvalidExecutionAlert(item){
-  const practiceFailure=state.mode==='practice'&&item&&item.practiceInvalidExecution;
-  const examFailure=state.mode==='exam'&&item&&item.examSequenceFailure
+function invalidExecutionBelongsToStatement(item,statement){
+  if(!item) return false;
+  const failure=state.mode==='practice'
+    ? item.practiceInvalidExecution : item.examSequenceFailure;
+  if(!failure) return false;
+  const renderedStatement=statement||(
+    typeof currentProgramStatement==='function'?currentProgramStatement(item):null);
+  if(!renderedStatement) return false;
+  // Current records carry the precise origin. Older persisted attempts may
+  // predate statementId; in that case the program cursor still identifies
+  // the statement at which execution stopped.
+  if(failure.statementId!=null) return failure.statementId===renderedStatement.id;
+  const current=typeof currentProgramStatement==='function'
+    ? currentProgramStatement(item) : null;
+  return !!(current&&current.id===renderedStatement.id);
+}
+
+function renderInvalidExecutionAlert(item,statement){
+  const belongs=invalidExecutionBelongsToStatement(item,statement);
+  const practiceFailure=belongs&&state.mode==='practice'&&item&&item.practiceInvalidExecution;
+  const examFailure=belongs&&state.mode==='exam'&&item&&item.examSequenceFailure
     &&item.examSequenceFailure.terminal;
   if(!practiceFailure&&!examFailure) return null;
   const title=practiceFailure?'Invalid execution':'Invalid execution — item ended';
@@ -153,6 +172,7 @@ function programStatementSource(statement,item){
   if(statement.kind==='assignment'){
     return `${statement.target} ${statement.operator} ${renderString(statement.runtime.originalTree)};`;
   }
+  if(statement.kind==='unary-update') return unaryUpdateSource(statement);
   const expression=renderString(item.originalTree);
   return typeof assignLineString==='function'
     ? assignLineString(expression,item.resultName)
@@ -300,6 +320,9 @@ function renderSession(container){
     if(examBar) container.appendChild(examBar);
   }
   const hasInteractiveDeclarations = itemHasInteractiveProgram(item);
+  const expressionStatement=item.program&&Array.isArray(item.program.statements)
+    ? item.program.statements.find(statement=>statement.kind==='legacy-expression')
+    : null;
   let evaluationHost=container;
   if(embeddedProgram){
     evaluationHost=h('section',{class:'program-statement legacy-program-statement active expanded',
@@ -331,7 +354,7 @@ function renderSession(container){
     })
   });
   evaluationHost.appendChild(evalPanel);
-  const invalidExecutionAlert=renderInvalidExecutionAlert(item);
+  const invalidExecutionAlert=renderInvalidExecutionAlert(item,expressionStatement);
   if(invalidExecutionAlert) evaluationHost.appendChild(invalidExecutionAlert);
   const canReset = state.mode==='practice' && !item.checked && (
     item.trace.length>0 || (item.program && item.program.cursor>0));
@@ -571,6 +594,13 @@ function renderExpressionEvaluationPanel(options){
     ? (context.isSource?';':'') : ';';
   const trailingActions = context=>typeof options.renderTrailingActions==='function'
     ? options.renderTrailingActions(context) : null;
+  // Statement adapters may replace only the fully-resolved final value while
+  // retaining this renderer's source row, intermediate rows, alignment,
+  // animation lifecycle and connector IDs. Standalone unary updates use this
+  // to show the updated named memory slot instead of a context-free literal;
+  // ordinary/legacy expressions do not supply the hook and remain unchanged.
+  const finalValueNode = context=>typeof options.renderFinalValue==='function'
+    ? options.renderFinalValue(context) : null;
   const panelAttrs = {class:(options.panelClass || 'eval-panel')+' expression-scroll-surface'};
   if(options.statementId) panelAttrs['data-statement-id'] = options.statementId;
   const panel = h('div',panelAttrs);
@@ -619,13 +649,16 @@ function renderExpressionEvaluationPanel(options){
       const unresolved = collectUnresolvedFlat(runtime.workingFlat,[]).length>0;
       const enterClass = step._entered || !isCurrent ? '' : ' row-enter';
       step._entered = true;
+      const customFinalValue=isFinalRow ? finalValueNode({
+        runtime,step,index,flashId,color,isCurrent,isFinalRow
+      }) : null;
       row.appendChild(h('div',{class:'code-out'+enterClass},renderBadgeSlot(badge),
         prefixNodes({showLabel:false,isSource:false,ready:canInteract&&isFinalRow,isCurrent:true,isFinalRow,
           activeColor:stepColor(runtime.trace.length),stepCount:index+1,pendingStep:null,
           currentStep:step,flashId}),
-        canInteract
+        customFinalValue || (canInteract
           ? renderInteractiveFlatExpr(runtime.workingFlat,colors,stepColor(runtime.trace.length),flashId,unresolved)
-          : renderStaticFlatExpr(runtime.workingFlat,colors,flashId,null),terminator({isSource:false,isFinalRow}),
+          : renderStaticFlatExpr(runtime.workingFlat,colors,flashId,null)),terminator({isSource:false,isFinalRow}),
         trailingActions({isCurrent:true,isFinalRow,runtime})));
     } else {
       const nextStep = runtime.trace[index+1];
@@ -655,6 +688,11 @@ function canonicalProgramSegments(item){
       const targetRead=statement.kind==='assignment'&&isCompoundAssignment(statement)?1:0;
       segments.push({kind:'statement',statement,index,targetRead,expressionSteps,
         length:targetRead+expressionSteps+1});
+    } else if(statement.kind==='unary-update'){
+      const expressionSteps=(statement.runtime&&statement.runtime.canonicalTrace
+        ? statement.runtime.canonicalTrace.steps.length : 0);
+      segments.push({kind:'statement',statement,index,targetRead:0,expressionSteps,
+        length:expressionSteps});
     } else if(statement.kind==='legacy-expression'){
       segments.push({kind:'final',statement,index,length:item.canonicalTrace.steps.length});
     }
@@ -742,7 +780,8 @@ function renderCanonicalStatementSegment(segment,localIndex,globalIndex){
   const commitVisible=localIndex>=segment.length;
   const commitCurrent=commitVisible&&globalIndex===segment.start+segment.length;
   const labelText=statement.kind==='declaration'
-    ? `${declarationKeyword(statement)} ${statement.binding.name}` : statement.target;
+    ? `${declarationKeyword(statement)} ${statement.binding.name}`
+    : (statement.kind==='unary-update'?'':statement.target);
   const viewStatement=Object.assign({},statement,{runtime});
   const card=h('section',{class:`canonical-program-statement ${statement.kind}-statement`,
     'data-canonical-statement-id':statement.id});
@@ -750,11 +789,17 @@ function renderCanonicalStatementSegment(segment,localIndex,globalIndex){
     title:null,panelClass:'canonical-program-expression-panel',statementId:statement.id,
     statementNumber:segment.index+1,continuationStyle:true,interactive:false,
     rowsComplete:commitVisible,
-    isFullyResolved:()=>false,
-    renderPrefix:statement.kind==='declaration'
-      ? (context=>canonicalDeclarationPrefix(statement,labelText,labelText.length+1,context))
-      : (context=>canonicalAssignmentPrefix(viewStatement,context)),
-    renderAfterRows:commitVisible?(timeline=>appendCanonicalAssignmentResult(timeline,statement,sourceRuntime,commitCurrent)):null}));
+    isFullyResolved:()=>statement.kind==='unary-update'
+      &&typeof unaryUpdateRuntimeResolved==='function'&&unaryUpdateRuntimeResolved(runtime),
+    renderFinalValue:statement.kind==='unary-update'
+      ? (context=>renderUnaryUpdateStoredResult(statement,runtime,context)) : null,
+    renderPrefix:statement.kind==='unary-update'
+      ? (()=>[])
+      : (statement.kind==='declaration'
+        ? (context=>canonicalDeclarationPrefix(statement,labelText,labelText.length+1,context))
+        : (context=>canonicalAssignmentPrefix(viewStatement,context))),
+    renderAfterRows:commitVisible&&statement.kind!=='unary-update'
+      ? (timeline=>appendCanonicalAssignmentResult(timeline,statement,sourceRuntime,commitCurrent)):null}));
   return card;
 }
 

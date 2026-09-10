@@ -92,7 +92,7 @@ function renderAssignmentStatement(ctx){
   const {container,item,program,statement,statementIndex,isActive}=ctx;
   const runtime=statement.runtime;
   const expanded=statement.status==='complete'&&!!(statement._uiExpanded||statement._uiJustCompleted);
-  const card=h('section',{class:`program-statement assignment-statement ${statement.status}${item.practiceInvalidExecution?' practice-paused':''}`,'data-statement-id':statement.id});
+  const card=h('section',{class:`program-statement assignment-statement ${statement.status}${state.mode==='practice'&&invalidExecutionBelongsToStatement(item,statement)?' practice-paused':''}`,'data-statement-id':statement.id});
   if(!isActive&&!expanded){
     card.appendChild(renderProgramStatementSummary(statement,statementIndex,
       programStatementSource(statement,item)));
@@ -113,7 +113,7 @@ function renderAssignmentStatement(ctx){
     renderTrailingActions:()=>isActive
       ? renderInlineEvaluationActions({canUndo:canUndoForCurrentMode(item)&&!item.practiceInvalidExecution})
       : renderCollapseStatementAction(statement,statementIndex)}));
-  const invalidExecutionAlert=renderInvalidExecutionAlert(item);
+  const invalidExecutionAlert=renderInvalidExecutionAlert(item,statement);
   if(invalidExecutionAlert) card.appendChild(invalidExecutionAlert);
   if(isActive&&!item.checked){
     const unresolved=collectUnresolvedFlat(runtime.workingFlat,[]).length>0;

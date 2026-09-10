@@ -26,7 +26,7 @@ function renderDeclarationStatement(ctx){
   const runtime = statement.runtime;
   const expanded=statement.status==='complete'&&!!(statement._uiExpanded||statement._uiJustCompleted);
 
-  const card = h('section',{class:`program-statement declaration-statement ${statement.status}${item.practiceInvalidExecution?' practice-paused':''}`,
+  const card = h('section',{class:`program-statement declaration-statement ${statement.status}${state.mode==='practice'&&invalidExecutionBelongsToStatement(item,statement)?' practice-paused':''}`,
     'data-statement-id':statement.id});
   if(!isActive&&!expanded){
     card.appendChild(renderProgramStatementSummary(statement,statementIndex,
@@ -55,7 +55,7 @@ function renderDeclarationStatement(ctx){
       : renderCollapseStatementAction(statement,statementIndex)
   }));
 
-  const invalidExecutionAlert=renderInvalidExecutionAlert(item);
+  const invalidExecutionAlert=renderInvalidExecutionAlert(item,statement);
   if(invalidExecutionAlert) card.appendChild(invalidExecutionAlert);
 
   if(isActive&&!item.checked){

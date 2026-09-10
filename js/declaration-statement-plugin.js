@@ -39,6 +39,7 @@ function syncDeclarationOperandsFromMemory(statement, program){
 
 registerStatementPlugin({
   kind: 'declaration',
+  scoresCommit: true,
 
   classifyRejectedAction(ctx){
     if(ctx.action&&ctx.action.type==='commit-assignment'

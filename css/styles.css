@@ -1902,7 +1902,8 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .program-statement + .program-statement{border-top:1px solid var(--line-soft);}
 .program-statement:not(.expanded){overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;}
 .declaration-eval-panel,
-.assignment-eval-panel{
+.assignment-eval-panel,
+.unary-update-eval-panel{
   position:relative;
   margin:0 -16px;
   padding:5px 16px 12px;

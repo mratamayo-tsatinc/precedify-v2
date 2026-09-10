@@ -36,6 +36,8 @@ function renderStaticExpr(node, ctxPrec, colorMap, flashId, pendingId, pendingCo
     if(node.resolved){
       const col = colorMap.get(node.id);
       const isFlash = flashId!=null && node.id===flashId;
+      const mutationCard=renderResolvedUnaryMutationCard(node,col,isFlash);
+      if(mutationCard) return mutationCard;
       const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': node.id};
       if(col) attrs.style = `color:${col};`;
       return h('span',attrs, formatValue(node.resultValue));

@@ -181,7 +181,9 @@ function resolveBindingLive(binding, item){
     const trace = originStatement && originStatement.runtime ? originStatement.runtime.trace : [];
     const lastIdx = trace.length-1;
     const completionColor = originStatement && originStatement.runtime && originStatement.runtime.checked
-      ? stepVisualColor({action:'APPLY_ASSIGNMENT'},trace.length)
+      ? (originStatement.kind==='unary-update'&&lastIdx>=0
+        ? stepVisualColor(trace[lastIdx],lastIdx)
+        : stepVisualColor({action:'APPLY_ASSIGNMENT'},trace.length))
       : (lastIdx>=0 ? stepVisualColor(trace[lastIdx],lastIdx) : stepColor(0));
     return {hasValue:true, displayValue:memory.value, committed:true,originStatementId,
       flashColor:completionColor};

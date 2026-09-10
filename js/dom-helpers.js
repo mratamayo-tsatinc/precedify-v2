@@ -86,6 +86,25 @@ function renderValueCard(opts){
   );
 }
 
+// Once ++/-- fires, the operand still represents a named variable even
+// though it now supplies a numeric value to its surrounding expression.
+// Returning the shared memory-card component preserves that identity until a
+// later binary operation consumes the operand. Prefix cards contain the
+// updated value; postfix cards contain the original value used by the current
+// expression. The separate memory model already applies the corresponding
+// side effect at the correct time.
+function renderResolvedUnaryMutationCard(node,color,isFlash){
+  if(!node||node.kind!=='unary'||!node.resolved
+    ||(node.op!=='++'&&node.op!=='--')) return null;
+  const inner=node.inner||{};
+  const card=renderValueCard({
+    id:node.id,name:inner.name,value:node.resultValue,
+    kind:inner.kind==='constant'?'constant':'variable',color,isFlash
+  });
+  card.className+=' unary-mutating-result-card';
+  return card;
+}
+
 // ---------------------------------------------------------------------------
 // Result-connection helpers. Variable/constant retrieval keeps the binding's
 // stable identity color; operations receive a color by their trace position.
