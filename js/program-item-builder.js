@@ -158,6 +158,23 @@ function buildUnaryUpdateLessonStatements(item,lesson,memory){
     spec.target,spec.operator,spec.form,memory,index));
 }
 
+function buildAdvancedAssignmentUnaryStatements(item,memory){
+  const variables=item.decls.filter(declaration=>declaration.kind==='variable');
+  const constants=item.decls.filter(declaration=>declaration.kind==='constant');
+  const a=variables[0],b=variables[1]||a,c=variables[2]||a,k=constants[0];
+  if(!a) return [];
+  const statements=[];
+  statements.push(buildAssignmentStatementRuntime(a.name,'+=',
+    makeBinOp('*',namedValueTree(b,memory),makeLiteral(2)),memory,0));
+  statements.push(buildUnaryUpdateStatementRuntime(c.name,'--','postfix',memory,0));
+  statements.push(buildUnaryUpdateStatementRuntime(a.name,'++','prefix',memory,1));
+  statements.push(buildAssignmentStatementRuntime(b.name,'*=',
+    makeBinOp('-',namedValueTree(a,memory),k?namedValueTree(k,memory):makeLiteral(2)),memory,1));
+  statements.push(buildAssignmentStatementRuntime(c.name,'+=',
+    makeBinOp('%',namedValueTree(a,memory),makeLiteral(5)),memory,2));
+  return statements;
+}
+
 function applyProgramMemoryToTree(node,memory){
   if(!node) return;
   if(node.kind==='variable'||node.kind==='constant'){
@@ -190,7 +207,8 @@ function buildGeneratedProgram(item, profile){
 
   const isAssignmentLesson=!!cfg.assignmentLesson;
   const isUnaryUpdateLesson=!!cfg.unaryUpdateLesson;
-  const isProgramLesson=isAssignmentLesson||isUnaryUpdateLesson;
+  const isMixedUpdateLesson=!!cfg.mixedUpdateLesson;
+  const isProgramLesson=isAssignmentLesson||isUnaryUpdateLesson||isMixedUpdateLesson;
   const statements = item.decls.map((decl, index)=>{
     const initializerTree = isProgramLesson ? makeLiteral(decl.value) : declarationInitializerTree(item.decls, index);
     const statement = declarationStatement({
@@ -217,6 +235,13 @@ function buildGeneratedProgram(item, profile){
     const expectedMemory={};
     item.decls.forEach(decl=>{expectedMemory[decl.name]=decl.value;});
     statements.push(...buildUnaryUpdateLessonStatements(item,cfg.unaryUpdateLesson,expectedMemory));
+    rebuildFinalExpressionForMemory(item,expectedMemory);
+  }
+
+  if(isMixedUpdateLesson){
+    const expectedMemory={};
+    item.decls.forEach(decl=>{expectedMemory[decl.name]=decl.value;});
+    statements.push(...buildAdvancedAssignmentUnaryStatements(item,expectedMemory));
     rebuildFinalExpressionForMemory(item,expectedMemory);
   }
 

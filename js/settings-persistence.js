@@ -25,6 +25,7 @@ function normalizeAppSettings(value){
   if(practice.interactionMode==='guided'||practice.interactionMode==='strict-sequence'){
     normalized.practice.interactionMode=practice.interactionMode;
   }
+  normalized.practice.manualResponses=normalizeManualResponseSettings(practice.manualResponses,normalized.practice.manualResponses);
   const exam=value.exam&&typeof value.exam==='object'?value.exam:{};
   if(exam.interactionMode==='guided'||exam.interactionMode==='strict-sequence'){
     normalized.exam.interactionMode=exam.interactionMode;
@@ -35,12 +36,24 @@ function normalizeAppSettings(value){
   if(exam.feedbackRelease==='after-submit'||exam.feedbackRelease==='never'){
     normalized.exam.feedbackRelease=exam.feedbackRelease;
   }
+  normalized.exam.manualResponses=normalizeManualResponseSettings(exam.manualResponses,normalized.exam.manualResponses);
   // Assessment integrity invariants cannot be relaxed by stale/tampered data.
   normalized.exam.showCorrectSolution=false;
   normalized.exam.lockItemAfterCheck=true;
   normalized.exam.autoSubmitOnTimeout=true;
   normalized.schemaVersion=DEFAULT_APP_SETTINGS.schemaVersion;
   return normalized;
+}
+
+function normalizeManualResponseSettings(value,fallback){
+  const result=Object.assign({},fallback||{mode:'profile',namedValueRate:50,operatorRate:50});
+  if(!value||typeof value!=='object') return result;
+  if(value.mode==='profile'||value.mode==='off'||value.mode==='custom') result.mode=value.mode;
+  ['namedValueRate','operatorRate'].forEach(key=>{
+    const number=Number(value[key]);
+    if(Number.isFinite(number)) result[key]=Math.max(0,Math.min(100,Math.round(number)));
+  });
+  return result;
 }
 
 function loadPersistedAppSettings(){

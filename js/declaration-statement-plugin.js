@@ -55,10 +55,12 @@ registerStatementPlugin({
 
     if(action.type === 'commit-assignment'){
       if(!declarationInitializerResolved(statement)) return {applied:false};
-      const value = flatOperandValue(runtime.workingFlat.operands[0]);
+      const derivedValue = flatOperandValue(runtime.workingFlat.operands[0]);
+      const value = action.manualResponse ? action.manualResponse.value : derivedValue;
       const evalSteps = runtime.trace.filter(step=>step.action==='EVALUATE');
       runtime.checked = true;
       runtime.assignedValue = value;
+      runtime.manualCommitResponse=action.manualResponse||null;
       runtime.correctSteps = evalSteps.filter(step=>step.wasCorrect).length;
       runtime.totalOpSteps = evalSteps.length;
       runtime.wasCorrectAssignment = value === runtime.expectedValue;
@@ -108,6 +110,7 @@ registerStatementPlugin({
     delete ctx.program.memory[ctx.statement.binding.name];
     runtime.checked = false;
     runtime.assignedValue = null;
+    runtime.manualCommitResponse = null;
     runtime.wasCorrectAssignment = null;
     runtime.correctSteps = 0;
     runtime.totalOpSteps = 0;
@@ -133,6 +136,7 @@ registerStatementPlugin({
     runtime.trace = [];
     runtime.checked = false;
     runtime.assignedValue = null;
+    runtime.manualCommitResponse = null;
     runtime.wasCorrectAssignment = null;
     runtime.correctSteps = 0;
     runtime.totalOpSteps = 0;

@@ -199,7 +199,8 @@ function resolveBindingLive(binding, item){
       // source; only a to-be-assigned target starts blank).
       return {hasValue:true, displayValue: binding.declaredValue, committed:false, flashColor:null};
     }
-    return {hasValue:true, displayValue: binding.finalValue, committed:true, flashColor: originColorForNode(item.trace, binding.unaryNodeId)};
+    const unaryStep=item.trace[firedIdx];
+    return {hasValue:true, displayValue: unaryStep&&Object.prototype.hasOwnProperty.call(unaryStep,'writeValue')?unaryStep.writeValue:binding.finalValue, committed:true, flashColor: originColorForNode(item.trace, binding.unaryNodeId)};
   }
   // 'statement-complete' — postfix-mutated variable, or the assignment target.
   if(!itemFullyResolved(item)){
@@ -224,7 +225,7 @@ function resolveBindingLive(binding, item){
   }
   const displayValue = binding.kind==='target'
     ? flatOperandValue(item.workingFlat.operands[0]) // the student's own current derived value
-    : binding.finalValue;
+    : ((item.trace.find(step=>step.action==='UNARY'&&step.resultNodeId===binding.unaryNodeId)||{}).writeValue ?? binding.finalValue);
   return {hasValue:true, displayValue, committed:true, flashColor:color};
 }
 

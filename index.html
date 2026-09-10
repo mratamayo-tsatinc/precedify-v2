@@ -94,6 +94,14 @@
           <option value="strict-sequence">Strict sequence — invalid actions pause until Undo</option>
         </select>
         <small class="input-hint">Strict Practice lets students test executable operator orders. An action that cannot execute pauses the item, explains the problem, and must be undone before continuing.</small>
+        <label class="settings-field-label" for="practiceManualMode">Student-derived values</label>
+        <select id="practiceManualMode" class="settings-select" onchange="handleManualModeChange('practice')">
+          <option value="profile">Use each profile's setting</option><option value="off">Always auto-derive</option><option value="custom">Use custom rates</option>
+        </select>
+        <div id="practiceManualRates" class="manual-rate-fields">
+          <label>Named values (%)<input id="practiceNamedValueRate" type="number" min="0" max="100" value="50"></label>
+          <label>Operator results (%)<input id="practiceOperatorRate" type="number" min="0" max="100" value="50"></label>
+        </div>
       </div>
 
       <div class="settings-section" id="timerSection" style="display: none;">
@@ -118,6 +126,14 @@
             <option value="strict-sequence">Strict sequence — all operation candidates are selectable</option>
           </select>
           <small class="input-hint">In strict sequence mode, executable choices continue even when their order is wrong. An operation that cannot yet be computed ends the item, preserving only earned prefix credit.</small>
+          <label class="settings-field-label" for="examManualMode">Student-derived values</label>
+          <select id="examManualMode" class="settings-select" onchange="handleManualModeChange('exam')">
+            <option value="profile">Use each profile's setting</option><option value="off">Always auto-derive</option><option value="custom">Use custom rates</option>
+          </select>
+          <div id="examManualRates" class="manual-rate-fields">
+            <label>Named values (%)<input id="examNamedValueRate" type="number" min="0" max="100" value="50"></label>
+            <label>Operator results (%)<input id="examOperatorRate" type="number" min="0" max="100" value="50"></label>
+          </div>
           <label class="setting-toggle">
             <input type="checkbox" id="examAllowUndo">
             <span><b>Allow one-step Undo</b><small>Only within the current unfinished statement.</small></span>
@@ -212,6 +228,14 @@
     <div class="modal-footer">
       <button class="secondary-btn" onclick="closeScoreSummaryModal()">Close</button>
     </div>
+  </div>
+</div>
+
+<div id="manualResponseModal" class="manual-response-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="manualResponseTitle">
+  <div class="manual-response-card">
+    <div class="manual-response-heading"><i id="manualResponseIcon" class="fa-solid fa-calculator" aria-hidden="true"></i><h2 id="manualResponseTitle">Evaluate</h2></div>
+    <div id="manualResponseVisual" class="manual-response-visual"></div>
+    <div class="manual-response-actions"><button id="manualResponseCancel" type="button">Cancel</button><button id="manualResponseConfirm" type="button" disabled>Use value</button></div>
   </div>
 </div>
 <div id="scoreSummaryOverlay" class="modal-overlay" style="display: none;" onclick="closeScoreSummaryModal()"></div>
@@ -368,6 +392,7 @@
 <script src="js/state.js"></script>
 <script src="js/exam-persistence.js"></script>
 <script src="js/settings-persistence.js"></script>
+<script src="js/manual-response.js"></script>
 <script src="js/live-clock.js"></script>
 <script src="js/qr-share.js"></script>
 <script src="js/score-summary.js"></script>

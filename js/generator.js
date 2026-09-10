@@ -326,6 +326,7 @@ function finalizeProfile(raw){
     // Program behavior is opt-in. Existing profiles omit this field and are
     // adapted to the unchanged single-expression activity by state.js.
     program: raw.program ? Object.assign({}, raw.program) : null,
+    manualResponses: raw.manualResponses ? Object.assign({}, raw.manualResponses) : null,
     template: raw.template,
   };
   p._ast = parseTemplate(p.template);

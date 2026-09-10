@@ -41,7 +41,7 @@ function saveExamProgress(){
   if(state.screen !== 'session' && !(state.screen==='done'&&state.examSubmitted)) return;
   try{
     const record = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       email: state.userEmail,
       studentId: state.userStudentId,
       profileId: state.profileId,

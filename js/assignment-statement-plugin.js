@@ -81,12 +81,14 @@ registerStatementPlugin({
       if(!isCompoundAssignment(statement) || runtime.targetRevealed) return {applied:false};
       const target=program.memory[statement.target];
       runtime.targetRevealed=true;
-      runtime.targetReadValue=target.value;
+      runtime.targetReadValue=action.manualResponse?action.manualResponse.value:target.value;
       runtime.trace.push({
         action:'READ_TARGET',target:statement.target,targetKind:'variable',
-        sourceValue:target.value,resultNodeId:assignmentTargetTokenId(statement),
+        sourceValue:runtime.targetReadValue,resultNodeId:assignmentTargetTokenId(statement),
         expressionBefore:flatToString(runtime.workingFlat),
-        expressionAfter:flatToString(runtime.workingFlat)
+        expressionAfter:flatToString(runtime.workingFlat),manualResponse:!!action.manualResponse,
+        manualExpectedValue:action.manualResponse&&action.manualResponse.expectedValue,
+        manualWasCorrect:action.manualResponse&&action.manualResponse.wasCorrect
       });
       runtime.history.push(deepCloneFlat(runtime.workingFlat));
       if(!Array.isArray(runtime.assignmentActionOrder)) runtime.assignmentActionOrder=[];
@@ -99,13 +101,15 @@ registerStatementPlugin({
       const target = program.memory[statement.target];
       const beforeValue = isCompoundAssignment(statement) ? runtime.targetReadValue : target.value;
       const rhsValue = flatOperandValue(runtime.workingFlat.operands[0]);
-      const assignedValue = applyAssignmentOperator(statement.operator,beforeValue,rhsValue);
+      const computedValue = applyAssignmentOperator(statement.operator,beforeValue,rhsValue);
+      const assignedValue = action.manualResponse ? action.manualResponse.value : computedValue;
       const evalSteps = runtime.trace.filter(step=>step.action==='EVALUATE');
       runtime.checked = true;
       runtime.beforeMemory = Object.assign({},target);
       runtime.beforeValue = beforeValue;
       runtime.rhsValue = rhsValue;
       runtime.assignedValue = assignedValue;
+      runtime.manualCommitResponse=action.manualResponse||null;
       runtime.assignmentResultNodeId = isCompoundAssignment(statement)
         ? assignmentResultTokenId(statement) : null;
       runtime.assignmentMergePending = isCompoundAssignment(statement);
@@ -194,6 +198,7 @@ registerStatementPlugin({
     runtime.beforeMemory=null;
     runtime.rhsValue=null;
     runtime.assignedValue=null;
+    runtime.manualCommitResponse=null;
     runtime.assignmentMergePending=false;
     runtime.wasCorrectAssignment=null;
     runtime.correctSteps=0;
@@ -220,6 +225,7 @@ registerStatementPlugin({
     runtime.beforeValue=null;
     runtime.rhsValue=null;
     runtime.assignedValue=null;
+    runtime.manualCommitResponse=null;
     runtime.targetRevealed=false;
     runtime.targetReadValue=null;
     runtime.assignmentActionOrder=[];

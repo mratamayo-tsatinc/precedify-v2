@@ -173,6 +173,84 @@ function appendConnectorSvg(panel, paths, dots){
   panel.appendChild(svg);
 }
 
+// Manual-response prompts reuse the timeline's curve, vertical lead-in and
+// solid destination-anchor conventions. This remains an additive consumer of
+// connector-lines.js: timeline lookup, rendering and toggle behavior above are
+// unchanged.
+let manualResponseConnectorFrame = null;
+let manualResponseConnectorColor = null;
+let manualResponseConnectorObserver = null;
+let manualResponseConnectorListenersInstalled = false;
+
+function drawManualResponseConnector(){
+  manualResponseConnectorFrame=null;
+  const panel=document.getElementById('manualResponseVisual');
+  if(!panel) return;
+  const stale=panel.querySelector('.connector-svg');
+  if(stale) stale.remove();
+  const source=panel.querySelector('[data-manual-connector-source]');
+  const destination=panel.querySelector('[data-manual-connector-dest]');
+  if(!source||!destination) return;
+
+  const panelRect=connectorContentRect(panel);
+  const sourceRect=source.getBoundingClientRect();
+  const destinationRect=destination.getBoundingClientRect();
+  const x1=sourceRect.left+sourceRect.width/2-panelRect.left;
+  const y1=sourceRect.bottom-panelRect.top;
+  const x2=destinationRect.left+destinationRect.width/2-panelRect.left;
+  const y2=destinationRect.top-panelRect.top;
+  const halfGap=(y2-y1)/2;
+  const lead=Math.min(CONNECTOR_MAX_LEAD,halfGap>0?halfGap:0);
+  const color=manualResponseConnectorColor||'#ffa35c';
+
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d',`M ${x1} ${y1} C ${x1} ${y1+lead}, ${x2} ${y2-lead}, ${x2} ${y2}`);
+  path.setAttribute('stroke',color);
+  path.setAttribute('stroke-width','1.75');
+  path.setAttribute('fill','none');
+  path.setAttribute('stroke-linecap','round');
+  path.setAttribute('class','connector-line connector-line-current manual-response-connector-line');
+
+  const dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  dot.setAttribute('cx',String(x2));
+  dot.setAttribute('cy',String(y2));
+  dot.setAttribute('r','2.5');
+  dot.setAttribute('fill',color);
+  dot.setAttribute('class','connector-anchor-dot connector-line-current manual-response-connector-dot');
+  appendConnectorSvg(panel,[path],[dot]);
+}
+
+function scheduleManualResponseConnector(color){
+  manualResponseConnectorColor=color||manualResponseConnectorColor;
+  if(manualResponseConnectorFrame!=null) cancelAnimationFrame(manualResponseConnectorFrame);
+  manualResponseConnectorFrame=requestAnimationFrame(drawManualResponseConnector);
+  const panel=document.getElementById('manualResponseVisual');
+  if(panel) panel.onscroll=()=>scheduleManualResponseConnector(manualResponseConnectorColor);
+
+  if(!manualResponseConnectorListenersInstalled&&typeof window!=='undefined'){
+    manualResponseConnectorListenersInstalled=true;
+    window.addEventListener('resize',()=>scheduleManualResponseConnector(manualResponseConnectorColor));
+    if(window.visualViewport) window.visualViewport.addEventListener('resize',
+      ()=>scheduleManualResponseConnector(manualResponseConnectorColor));
+  }
+  if(typeof ResizeObserver!=='undefined'){
+    if(manualResponseConnectorObserver) manualResponseConnectorObserver.disconnect();
+    manualResponseConnectorObserver=new ResizeObserver(()=>scheduleManualResponseConnector(manualResponseConnectorColor));
+    if(panel) manualResponseConnectorObserver.observe(panel);
+    const source=panel&&panel.querySelector('[data-manual-connector-source]');
+    const destination=panel&&panel.querySelector('[data-manual-connector-dest]');
+    if(source) manualResponseConnectorObserver.observe(source);
+    if(destination) manualResponseConnectorObserver.observe(destination);
+  }
+}
+
+function clearManualResponseConnector(){
+  if(manualResponseConnectorFrame!=null){cancelAnimationFrame(manualResponseConnectorFrame);manualResponseConnectorFrame=null;}
+  if(manualResponseConnectorObserver){manualResponseConnectorObserver.disconnect();manualResponseConnectorObserver=null;}
+  const panel=document.getElementById('manualResponseVisual');
+  if(panel){panel.onscroll=null;const stale=panel.querySelector('.connector-svg');if(stale) stale.remove();}
+}
+
 // Measure in the panel's scroll-content coordinate space. Rows and SVG then
 // move together under horizontal scrolling, so scrolling itself needs no
 // connector redraw; only a genuine layout change does.

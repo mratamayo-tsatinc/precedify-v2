@@ -190,7 +190,7 @@ function countGroupMembers(flat, groupId){
 // last remaining pair (then the group is fully resolved and it becomes
 // free); any other combination (different groups, or one/both free) is a
 // crossing merge and the result is always free.
-function evaluateFlatAt(flat, leftId, rightId){
+function evaluateFlatAt(flat, leftId, rightId, resultOverride){
   for(let i=0;i<flat.operators.length;i++){
     const L = flat.operands[i], R = flat.operands[i+1];
     if(L.id===leftId && R.id===rightId){
@@ -198,6 +198,8 @@ function evaluateFlatAt(flat, leftId, rightId){
       const a = flatOperandValue(L), b = flatOperandValue(R);
       let result;
       try{ result = evalOp(op,a,b); } catch(e){ return {applied:false}; }
+      const computedResult=result;
+      if(arguments.length>=4) result=resultOverride;
       const newLiteral = makeLiteral(result);
       if(L.parenGroup!=null && L.parenGroup===R.parenGroup){
         const remainingBefore = countGroupMembers(flat, L.parenGroup);
@@ -207,7 +209,7 @@ function evaluateFlatAt(flat, leftId, rightId){
       }
       const newOperands = flat.operands.slice(0,i).concat([newLiteral], flat.operands.slice(i+2));
       const newOperators = flat.operators.slice(0,i).concat(flat.operators.slice(i+1));
-      return {newFlat:{operands:newOperands, operators:newOperators}, applied:true, op, a, b, result, resultId:newLiteral.id};
+      return {newFlat:{operands:newOperands, operators:newOperators}, applied:true, op, a, b, result, computedResult, resultId:newLiteral.id};
     }
   }
   return {applied:false};

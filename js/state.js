@@ -5,7 +5,7 @@ const state = {
   screen: 'login', // login | setup | session | done
   userEmail: null,
   userStudentId: null,
-  language: 'java',
+  language: 'c',
   mode: 'practice',
   profileId: PROFILES[0].id,
   itemIndex: 0,
@@ -30,14 +30,15 @@ const state = {
 //  - timerMinutes: duration for exam mode (set once at login)
 // ============================================================================
 const DEFAULT_APP_SETTINGS = Object.freeze({
-  schemaVersion: 4,
+  schemaVersion: 5,
   // local-configurable | state-only. This deployment switch is intentionally
   // read only: persisted browser data can never override it.
-  settingsPolicy: 'state-only',
+  settingsPolicy: 'local-configurable',
   mode: 'practice',
   timerMinutes: 15,
   practice: Object.freeze({
-    interactionMode: 'guided' // guided | strict-sequence
+    interactionMode: 'guided', // guided | strict-sequence
+    manualResponses:Object.freeze({mode:'profile',namedValueRate:50,operatorRate:50})
   }),
   exam: Object.freeze({
     interactionMode: 'guided', // guided | strict-sequence
@@ -49,6 +50,7 @@ const DEFAULT_APP_SETTINGS = Object.freeze({
     lockItemAfterCheck: true,
     autoSubmitOnTimeout: true,
     showCorrectSolution: false
+    ,manualResponses:Object.freeze({mode:'profile',namedValueRate:50,operatorRate:50})
   })
 });
 
@@ -58,8 +60,8 @@ function cloneDefaultAppSettings(){
     settingsPolicy:DEFAULT_APP_SETTINGS.settingsPolicy,
     mode:DEFAULT_APP_SETTINGS.mode,
     timerMinutes:DEFAULT_APP_SETTINGS.timerMinutes,
-    practice:Object.assign({},DEFAULT_APP_SETTINGS.practice),
-    exam:Object.assign({},DEFAULT_APP_SETTINGS.exam)
+    practice:Object.assign({},DEFAULT_APP_SETTINGS.practice,{manualResponses:Object.assign({},DEFAULT_APP_SETTINGS.practice.manualResponses)}),
+    exam:Object.assign({},DEFAULT_APP_SETTINGS.exam,{manualResponses:Object.assign({},DEFAULT_APP_SETTINGS.exam.manualResponses)})
   };
 }
 
@@ -68,17 +70,20 @@ function settingsAreStateOnly(){
 }
 
 function snapshotPracticePolicy(settings){
-  return Object.assign({},DEFAULT_APP_SETTINGS.practice,(settings&&settings.practice)||{});
+  const source=(settings&&settings.practice)||{};
+  return Object.assign({},DEFAULT_APP_SETTINGS.practice,source,{manualResponses:Object.assign({},DEFAULT_APP_SETTINGS.practice.manualResponses,source.manualResponses||{})});
 }
 
 let appSettings = cloneDefaultAppSettings();
 
 function snapshotExamPolicy(settings){
-  return Object.assign({},DEFAULT_APP_SETTINGS.exam,(settings&&settings.exam)||{}, {
+  const source=(settings&&settings.exam)||{};
+  return Object.assign({},DEFAULT_APP_SETTINGS.exam,source, {
     // Correct-solution disclosure is never a configurable exam behavior.
     showCorrectSolution:false,
     lockItemAfterCheck:true,
-    autoSubmitOnTimeout:true
+    autoSubmitOnTimeout:true,
+    manualResponses:Object.assign({},DEFAULT_APP_SETTINGS.exam.manualResponses,source.manualResponses||{})
   });
 }
 
@@ -176,6 +181,7 @@ function generateItemsForProfile(profileId) {
     buildGeneratedProgram(item, profile);
     items.push(item);
   }
+  if(typeof assignManualResponsePlans==='function') assignManualResponsePlans(profile,items);
   return items;
 }
 
@@ -233,9 +239,16 @@ function itemFullyResolved(item){
 function handleTokenClick(action){
   const item = currentItem();
   if(!item || item.checked || state.examSubmitted || item.practiceInvalidExecution) return;
+  const statement=currentProgramStatement(item);
+  const runtime=statement&&statement.kind==='legacy-expression'?item:(statement&&statement.runtime);
+  if(!action.manualResponse&&typeof manualResponseDescriptor==='function'){
+    const descriptor=manualResponseDescriptor(item,statement,runtime,action);
+    if(descriptor){
+      requestManualResponse(descriptor,response=>handleTokenClick(Object.assign({},action,{manualResponse:response})));
+      return;
+    }
+  }
   const applyAction = ()=>{
-    const statement=currentProgramStatement(item);
-    const runtime=statement&&statement.kind==='legacy-expression'?item:(statement&&statement.runtime);
     const traceLength=runtime&&runtime.trace?runtime.trace.length:0;
     const result = dispatchProgramAction(item, action, {applyExpressionAction});
     if(result.applied){
@@ -249,9 +262,13 @@ function handleTokenClick(action){
       recordExamAction(item,action,{
         statementId:statement&&statement.id,
         wasCorrect:actionWasCorrect,
-        scoredAction,
+        scoredAction:scoredAction||!!action.manualResponse,
         creditEligible:actionWasCorrect!==false,
-        value:event&&event.value
+        value:event&&event.value,
+        manualResponseValue:action.manualResponse&&action.manualResponse.value,
+        manualExpectedValue:action.manualResponse&&action.manualResponse.expectedValue,
+        manualWasCorrect:action.manualResponse&&action.manualResponse.wasCorrect,
+        manualResponseKey:action.manualResponse&&action.manualResponse.key
       });
       render();
     } else if(strictSequenceEnabled()){
@@ -268,7 +285,7 @@ function handleTokenClick(action){
     // When the optional memory animation is enabled, substitution remains a
     // two-phase action. It now starts only after the empty stage is on-screen.
     if(action && (action.type==='substitute'||action.type==='reveal-assignment-target')
-      && typeof animateVarFinalMemoryToExpression==='function'
+      && !action.manualResponse && typeof animateVarFinalMemoryToExpression==='function'
       && animateVarFinalMemoryToExpression(item,action,applyAction)) return;
     applyAction();
   };
@@ -292,6 +309,7 @@ function examCurrentCorrectScoredChecks(item){
       if(statement.runtime.checked&&statement.runtime.wasCorrectAssignment===true) correct++;
     });
   }
+  if(typeof manualResponseFacts==='function') correct+=manualResponseFacts(item).correct;
   return correct;
 }
 
@@ -309,6 +327,7 @@ function examCanonicalScoredCheckCount(item){
       total+=canonical.filter(step=>step.action==='EVALUATE').length+1;
     });
   }
+  if(typeof plannedManualScoredCheckCount==='function') total+=plannedManualScoredCheckCount(item);
   return Math.max(1,total);
 }
 
@@ -429,17 +448,21 @@ function applyExpressionAction(item, action){
       // like any other variable operand.
       if(node.substituted) return false;
       const before = flatToString(item.workingFlat);
+      if(action.manualResponse) node.inner.declaredValue=action.manualResponse.value;
       item.workingFlat = substituteFlatById(item.workingFlat, action.id);
       const after = flatToString(item.workingFlat);
-      item.trace.push({action:'SUBSTITUTE', target:(node.inner.kind==='literal'?String(node.inner.value):node.inner.name), targetKind:node.inner.kind, sourceValue:unaryBaseValue(node), expressionBefore:before, expressionAfter:after, resultNodeId:node.id});
+      item.trace.push({action:'SUBSTITUTE', target:(node.inner.kind==='literal'?String(node.inner.value):node.inner.name), targetKind:node.inner.kind, sourceValue:unaryBaseValue(node), expressionBefore:before, expressionAfter:after, resultNodeId:node.id,
+        manualResponse:!!action.manualResponse,manualExpectedValue:action.manualResponse&&action.manualResponse.expectedValue,manualWasCorrect:action.manualResponse&&action.manualResponse.wasCorrect});
       item.history.push(deepCloneFlat(item.workingFlat));
       return true;
     }
     if(node.resolved) return false;
     const before = flatToString(item.workingFlat);
+    if(action.manualResponse) node.declaredValue=action.manualResponse.value;
     item.workingFlat = resolveFlatById(item.workingFlat, action.id);
     const after = flatToString(item.workingFlat);
-    item.trace.push({action:'SUBSTITUTE', target:node.name, targetKind:node.kind, sourceValue:node.declaredValue, expressionBefore:before, expressionAfter:after, resultNodeId:node.id});
+    item.trace.push({action:'SUBSTITUTE', target:node.name, targetKind:node.kind, sourceValue:node.declaredValue, expressionBefore:before, expressionAfter:after, resultNodeId:node.id,
+      manualResponse:!!action.manualResponse,manualExpectedValue:action.manualResponse&&action.manualResponse.expectedValue,manualWasCorrect:action.manualResponse&&action.manualResponse.wasCorrect});
     item.history.push(deepCloneFlat(item.workingFlat));
     return true;
   }
@@ -451,9 +474,16 @@ function applyExpressionAction(item, action){
     const node = findFlatOperandById(item.workingFlat, action.id);
     if(!node || node.kind!=='unary' || !node.substituted || node.resolved) return false;
     const before = flatToString(item.workingFlat);
-    item.workingFlat = resolveFlatById(item.workingFlat, action.id);
+    const base=unaryBaseValue(node);
+    const expected=node.op==='!'?!base:base+(node.op==='++'?1:-1);
+    const writeValue=action.manualResponse?action.manualResponse.value:expected;
+    const expressionValue=node.op==='!'?writeValue:(node.form==='postfix'?base:writeValue);
+    item.workingFlat={operands:item.workingFlat.operands.map(operand=>operand.id===node.id
+      ?Object.assign({},operand,{resolved:true,resultValue:expressionValue}):operand),operators:item.workingFlat.operators};
     const after = flatToString(item.workingFlat);
-    item.trace.push({action:'UNARY', op:node.op, form:node.form, target:(node.inner.kind==='literal'?String(node.inner.value):node.inner.name), sourceValue:unaryBaseValue(node), result:unaryComputedValue(node), expressionBefore:before, expressionAfter:after, resultNodeId:node.id});
+    item.trace.push({action:'UNARY', op:node.op, form:node.form, target:(node.inner.kind==='literal'?String(node.inner.value):node.inner.name), sourceValue:base, result:expressionValue,writeValue,
+      expressionBefore:before, expressionAfter:after, resultNodeId:node.id,manualResponse:!!action.manualResponse,
+      manualExpectedValue:action.manualResponse&&action.manualResponse.expectedValue,manualWasCorrect:action.manualResponse&&action.manualResponse.wasCorrect});
     item.history.push(deepCloneFlat(item.workingFlat));
     return true;
   }
@@ -473,11 +503,14 @@ function applyExpressionAction(item, action){
     // still the required next phase before any binary evaluation.
     const wasCorrect = !unresolvedAny
       && maxCands.some(c=>c.leftId===action.leftId && c.rightId===action.rightId);
-    const evalResult = evaluateFlatAt(item.workingFlat, action.leftId, action.rightId);
+    const evalResult = action.manualResponse
+      ?evaluateFlatAt(item.workingFlat,action.leftId,action.rightId,action.manualResponse.value)
+      :evaluateFlatAt(item.workingFlat, action.leftId, action.rightId);
     if(!evalResult.applied) return false;
     item.workingFlat = evalResult.newFlat;
     const after = flatToString(item.workingFlat);
-    item.trace.push({action:'EVALUATE', target:{operator:evalResult.op, operands:[evalResult.a, evalResult.b]}, result:evalResult.result, expressionBefore:before, expressionAfter:after, wasCorrect, expectedOperators:maxCands.map(candidate=>candidate.op), resultNodeId:evalResult.resultId, leftId:action.leftId, rightId:action.rightId});
+    item.trace.push({action:'EVALUATE', target:{operator:evalResult.op, operands:[evalResult.a, evalResult.b]}, result:evalResult.result, expressionBefore:before, expressionAfter:after, wasCorrect, expectedOperators:maxCands.map(candidate=>candidate.op), resultNodeId:evalResult.resultId, leftId:action.leftId, rightId:action.rightId,
+      manualResponse:!!action.manualResponse,manualExpectedValue:action.manualResponse&&action.manualResponse.expectedValue,manualWasCorrect:action.manualResponse&&action.manualResponse.wasCorrect});
     item.history.push(deepCloneFlat(item.workingFlat));
     return true;
   }
@@ -770,6 +803,9 @@ function checkExpressionItem(item){
     totalOpSteps:totalOpSteps + priorTotalChecks,
     wasCorrectFinal
   };
+  const manualFacts=typeof manualResponseFacts==='function'?manualResponseFacts(item):{correct:0,total:0};
+  scoringFacts.correctSteps+=manualFacts.correct;
+  scoringFacts.totalOpSteps+=manualFacts.total;
   if(state.mode==='exam'&&Array.isArray(item.examActionLog)){
     const attemptedEvaluations=item.examActionLog.filter(entry=>entry.type==='evaluate');
     if(attemptedEvaluations.length){
@@ -780,7 +816,8 @@ function checkExpressionItem(item){
         }) : [];
       scoringFacts.correctSteps=attemptedEvaluations.filter(entry=>entry.wasCorrect===true).length
         +assignmentStatements.filter(statement=>statement.runtime.wasCorrectAssignment).length;
-      scoringFacts.totalOpSteps=attemptedEvaluations.length+assignmentStatements.length;
+      scoringFacts.totalOpSteps=attemptedEvaluations.length+assignmentStatements.length+manualFacts.total;
+      scoringFacts.correctSteps+=manualFacts.correct;
     }
   }
   const {points, maxPoints} = scoreItem(scoringFacts, itemProfile.pointsPerItem);

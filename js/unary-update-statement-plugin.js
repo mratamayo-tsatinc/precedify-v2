@@ -73,7 +73,10 @@ registerStatementPlugin({
 
     const target=program.memory[statement.target];
     const beforeValue=target.value;
-    const assignedValue=beforeValue+unaryUpdateDelta(statement);
+    const unaryStep=runtime.trace&&runtime.trace[runtime.trace.length-1];
+    const assignedValue=unaryStep&&Object.prototype.hasOwnProperty.call(unaryStep,'writeValue')
+      ?unaryStep.writeValue:beforeValue+unaryUpdateDelta(statement);
+    if(unaryStep&&unaryStep.manualResponse) unaryStep.manualResponseCountsAsWrite=true;
     normalizeUnaryUpdateResult(runtime,assignedValue);
     runtime.checked=true;
     runtime.beforeMemory=Object.assign({},target);

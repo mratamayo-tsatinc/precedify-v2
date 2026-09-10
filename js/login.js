@@ -165,6 +165,8 @@ function openSettingsModal() {
   if(practiceInteractionMode) practiceInteractionMode.value=practice.interactionMode;
   const interactionMode=document.getElementById('examInteractionMode');
   if(interactionMode) interactionMode.value=exam.interactionMode;
+  setManualSettingsControls('practice',practice.manualResponses);
+  setManualSettingsControls('exam',exam.manualResponses);
   const setChecked=(id,value)=>{const el=document.getElementById(id);if(el)el.checked=!!value;};
   setChecked('examAllowUndo',exam.allowUndo);
   setChecked('examAllowReviewFlags',exam.allowReviewFlags);
@@ -217,6 +219,30 @@ function handleModeChange() {
   }
 }
 
+function setManualSettingsControls(scope,settings){
+  settings=settings||{mode:'profile',namedValueRate:50,operatorRate:50};
+  const mode=document.getElementById(`${scope}ManualMode`);
+  const named=document.getElementById(`${scope}NamedValueRate`);
+  const operator=document.getElementById(`${scope}OperatorRate`);
+  if(mode) mode.value=settings.mode||'profile';
+  if(named) named.value=settings.namedValueRate;
+  if(operator) operator.value=settings.operatorRate;
+  handleManualModeChange(scope);
+}
+
+function handleManualModeChange(scope){
+  const mode=document.getElementById(`${scope}ManualMode`);
+  const rates=document.getElementById(`${scope}ManualRates`);
+  if(rates) rates.style.display=mode&&mode.value==='custom'?'grid':'none';
+}
+
+function readManualSettingsControls(scope){
+  const mode=(document.getElementById(`${scope}ManualMode`)||{}).value;
+  const rate=id=>Math.max(0,Math.min(100,Math.round(Number((document.getElementById(id)||{}).value)||0)));
+  return {mode:mode==='off'||mode==='custom'?mode:'profile',
+    namedValueRate:rate(`${scope}NamedValueRate`),operatorRate:rate(`${scope}OperatorRate`)};
+}
+
 function validateTimerInput(input) {
   let value = parseInt(input.value, 10);
   
@@ -256,7 +282,8 @@ function saveSettings() {
   appSettings.mode = selectedMode;
   appSettings.practice={
     interactionMode:(document.getElementById('practiceInteractionMode')||{}).value==='strict-sequence'
-      ?'strict-sequence':'guided'
+      ?'strict-sequence':'guided',
+    manualResponses:readManualSettingsControls('practice')
   };
   const checked=id=>{const el=document.getElementById(id);return !!(el&&el.checked);};
   appSettings.exam={
@@ -267,7 +294,8 @@ function saveSettings() {
     showNeutralGuidance:checked('examShowNeutralGuidance'),
     showScoresDuringExam:checked('examShowScoresDuringExam'),
     feedbackRelease:(document.getElementById('examFeedbackRelease')||{}).value==='never'?'never':'after-submit',
-    lockItemAfterCheck:true,autoSubmitOnTimeout:true,showCorrectSolution:false
+    lockItemAfterCheck:true,autoSubmitOnTimeout:true,showCorrectSolution:false,
+    manualResponses:readManualSettingsControls('exam')
   };
   // Persist immediately — this global setting is the single source of
   // truth every subsequent refresh/login checks before resuming exam
