@@ -184,6 +184,22 @@ function manualResponseOperand(operand){
     return manualResponseBindingCard(operand.name,operand.kind,formatValue(operand.declaredValue));
   }
   if(operand.kind==='unary'){
+    // Mirror the operand's CURRENT statement representation. Once logical
+    // NOT has been applied, its input variable has been consumed and the
+    // expression contains a derived Boolean literal (e.g. !x -> false).
+    // Reconstructing the original variable card here would show x's memory
+    // value instead of the actual operand selected beside &&/||.
+    if(operand.resolved){
+      if((operand.op==='++'||operand.op==='--')&&operand.inner
+        &&(operand.inner.kind==='variable'||operand.inner.kind==='constant')){
+        // Mutating unary results deliberately retain named-variable identity
+        // in the statement, so preserve that card while using its current
+        // expression value rather than the pre-operation memory value.
+        return manualResponseBindingCard(operand.inner.name,operand.inner.kind,
+          formatValue(flatOperandValue(operand)));
+      }
+      return h('span',{class:'tok tok-lit'},formatValue(flatOperandValue(operand)));
+    }
     if(operand.inner&&(operand.inner.kind==='variable'||operand.inner.kind==='constant')){
       return manualResponseBindingCard(operand.inner.name,operand.inner.kind,formatValue(unaryBaseValue(operand)));
     }
