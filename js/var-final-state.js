@@ -229,39 +229,24 @@ function resolveBindingLive(binding, item){
   return {hasValue:true, displayValue, committed:true, flashColor:color};
 }
 
-function bindingTagText(binding, live){
-  if(binding.kind==='program-constant'){
-    return live.committed ? 'constant assigned — immutable' : 'constant — not yet assigned';
-  }
-  if(binding.kind==='program-variable'){
-    return live.committed ? 'variable assigned' : 'variable — not yet assigned';
-  }
-  if(binding.trigger==='static') return 'unchanged';
-  if(binding.kind==='target') return live.committed ? 'assigned' : 'not yet assigned';
-  if(binding.trigger==='per-step'){
-    return live.committed ? `${binding.op}${binding.name} applied` : `${binding.op}${binding.name} — not yet applied`;
-  }
-  // statement-complete, postfix variable
-  return live.committed
-    ? `${binding.name}${binding.op} applied — used ${formatValue(binding.declaredValue)} in the expression`
-    : `${binding.name}${binding.op} — updates once the statement completes`;
+// Memory uses two visual rows on compact screens: immutable constants first,
+// then variables/targets. Keeping this grouping in the shared renderer makes
+// the inline fallback and draggable panel follow the same ordering.
+function createVarFinalGroups(){
+  const constant=h('div',{class:'var-final-group var-final-group-constants'});
+  const variable=h('div',{class:'var-final-group var-final-group-variables'});
+  constant._vfBindingCount=0;
+  variable._vfBindingCount=0;
+  return {constant,variable};
 }
-// Retained as a compact-label compatibility helper for external renderers.
-// Built-in memory panels now expose the full status only through the shared
-// hover/focus/touch information trigger below.
-function bindingTagShort(binding, live){
-  if(binding.kind==='program-constant') return live.committed ? 'constant · set' : 'constant · pending';
-  if(binding.kind==='program-variable') return live.committed ? 'assigned' : 'pending';
-  if(binding.trigger==='static') return 'unchanged';
-  if(binding.kind==='target') return live.committed ? 'assigned' : 'pending';
-  return live.committed ? 'applied' : 'pending';
+function appendVarFinalGroups(list,groups){
+  if(groups.constant._vfBindingCount) list.appendChild(groups.constant);
+  if(groups.variable._vfBindingCount) list.appendChild(groups.variable);
 }
-
-function renderBindingInfoTrigger(fullTag,unchanged){
-  return h('details',{class:'vf-tag'+(unchanged?' vf-unchanged':'')},
-    h('summary',{title:fullTag,'aria-label':fullTag},
-      h('i',{class:'fa-solid fa-circle-info vf-hint-icon','aria-hidden':'true'})),
-    h('span',{class:'vf-tag-detail'},fullTag));
+function varFinalGroupForBinding(groups,binding){
+  const group=binding.kind==='program-constant' ? groups.constant : groups.variable;
+  group._vfBindingCount++;
+  return group;
 }
 
 // Builds the section DOM, or returns null when there's nothing to show at
@@ -279,6 +264,7 @@ function renderVariableFinalState(item){
     itemHasInteractiveProgram(item) ? 'Program variables and constants' : 'Variable final state'));
 
   const list = h('div',{class:'var-final-list'});
+  const groups = createVarFinalGroups();
   bindings.forEach(b=>{
     const live = resolveBindingLive(b, item);
     if(live.hasValue) b._lastDisplayValue=live.displayValue;
@@ -299,11 +285,10 @@ function renderVariableFinalState(item){
       color: live.flashColor,
       isFlash
     }));
-    const fullTag = bindingTagText(b, live);
-    row.appendChild(renderBindingInfoTrigger(fullTag,b.trigger==='static'));
-    list.appendChild(row);
+    varFinalGroupForBinding(groups,b).appendChild(row);
   });
 
+  appendVarFinalGroups(list,groups);
   wrap.appendChild(list);
   return wrap;
 }

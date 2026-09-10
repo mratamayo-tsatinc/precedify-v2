@@ -604,17 +604,17 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
   font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-mute);
   font-weight:700;margin-bottom:11px;
 }
-/* Each binding (declared variable OR the statement's own assignment
-   target, "result" — see var-final-state.js's binding model) renders as
-   its own fixed-size memory card + a short status line underneath. A grid
-   keeps every slot aligned while still reflowing for narrow screens. */
+/* Each binding renders as an equal memory card. Category wrappers are
+   visually transparent on wide screens and become compact constant/variable
+   rows inside the floating panel on mobile. */
 .var-final-list{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(92px,1fr));
-  gap:14px 10px;
+  gap:10px;
 }
+.var-final-group{display:contents;}
 .var-final-row{
-  display:flex;flex-direction:column;align-items:center;gap:6px;
+  display:flex;flex-direction:column;align-items:center;
   min-width:0;width:100%;
 }
 /* Cards here sit in a block-level flex column, not inline text, so the
@@ -630,32 +630,6 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .var-final-row .tok-card-body{
   display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.vf-tag{
-  position:relative;font-family:var(--ui);font-size:11px;color:var(--text-mute);line-height:1.4;
-}
-.vf-tag summary{
-  list-style:none;display:flex;align-items:center;justify-content:center;
-  width:22px;height:22px;margin:auto;border-radius:50%;cursor:pointer;
-}
-.vf-tag summary::-webkit-details-marker{display:none;}
-.vf-tag summary:hover,.vf-tag summary:focus-visible,.vf-tag[open] summary{
-  color:var(--text);background:var(--panel-alt);
-}
-.vf-hint-icon{font-size:10px;color:inherit;opacity:0.75;}
-.vf-tag-detail{
-  position:absolute;left:50%;top:25px;z-index:25;transform:translateX(-50%);
-  width:150px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;
-  background:var(--panel-alt);box-shadow:0 7px 18px rgba(0,0,0,.35);
-  color:var(--text-dim);font-size:10.5px;line-height:1.4;text-align:left;
-}
-/* A binding whose trigger has actually fired (prefix mid-derivation, or
-   postfix/target once the statement completes) gets its tag brightened —
-   the same "something happened here" visual language the timeline uses —
-   so a glance down this row flags exactly which bindings have changed so
-   far. The card keeps its stable binding-identity color while the step
-   color remains available to its one-shot arrival pulse. */
-.var-final-row.var-final-changed .vf-tag{color:var(--text-dim);}
-
 /* ========== LOGIN FORM STYLES ========== */
 .login-overlay {
   display: flex;

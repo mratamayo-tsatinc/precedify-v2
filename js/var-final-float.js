@@ -57,7 +57,7 @@
 // transient flying token carries the new value in from its origin — rather
 // than rendering the post-commit value immediately like the original does.
 // Everything it depends on (ensureBindings, resolveBindingLive,
-// bindingTagText, bindingTagShort, `b._flashed`) is reused as-is from
+// the shared memory grouping helpers, `b._flashed`) is reused as-is from
 // var-final-state.js's global functions/binding objects, so both paths stay
 // in lockstep: whichever one runs for a given render is the one that
 // consumes (sets) `b._flashed`, so switching the toggle mid-session never
@@ -67,11 +67,9 @@
 let floatVisible = true;
 let flyAnimEnabled = false;
 
-// Flight duration, in ms — one of three discrete levels (1s/2s/3s), chosen
-// via the segmented toggle rendered inside the panel body (see
-// renderVarFinalSpeedToggle) whenever fly-in mode is
-// on. Module-local like everything else here, so it persists across
-// re-renders even though the toggle's own DOM node is rebuilt each time.
+// Flight duration, in ms — one of three discrete levels (1s/2s/3s). The
+// compact header control cycles Off -> 1s -> 2s -> 3s instead of consuming a
+// separate settings row in the panel body.
 let flightDurationMs = 1000;
 
 // Dragged position, in viewport px — null until the user actually drags the
@@ -100,7 +98,7 @@ let floatWasMounted = false;
 // ----------------------------------------------------------------------------
 // Toggles. toggleVarFinalFloatVisible is wired from index.html, mirroring
 // toggleConnectors()'s header-button pattern in connector-lines.js.
-// toggleVarFinalFlyAnim is wired from the button built in
+// cycleVarFinalFlyAnimation is wired from the button built in
 // mountVarFinalFloatPanel below instead — see the module header comment for
 // why it doesn't belong in the global app header.
 // ----------------------------------------------------------------------------
@@ -109,17 +107,16 @@ function toggleVarFinalFloatVisible(){
   syncVarFinalFloatToggleUI();
   render();
 }
-function toggleVarFinalFlyAnim(){
-  // Only ever wired to a button rendered inside the panel's own header (see
-  // mountVarFinalFloatPanel), which only exists while floatVisible is true —
-  // so unlike before, there's no "inert/disabled while hidden" state to
-  // guard against here; if this runs, the panel is on screen.
-  flyAnimEnabled = !flyAnimEnabled;
-  // A render() IS needed here now (the old header-button version didn't
-  // need one): the toggle button's own active/inactive look and the speed
-  // toggle's visibility both live inside the panel body, which is rebuilt
-  // by render() — without this the click would silently do nothing until
-  // some unrelated render happened to fire.
+const SPEED_LEVELS = [1000, 2000, 3000];
+function cycleVarFinalFlyAnimation(){
+  if(!flyAnimEnabled){
+    flyAnimEnabled = true;
+    flightDurationMs = SPEED_LEVELS[0];
+  } else {
+    const levelIndex=SPEED_LEVELS.indexOf(flightDurationMs);
+    if(levelIndex<0 || levelIndex===SPEED_LEVELS.length-1) flyAnimEnabled=false;
+    else flightDurationMs=SPEED_LEVELS[levelIndex+1];
+  }
   render();
 }
 
@@ -270,6 +267,7 @@ function buildAnimatedVarFinalSection(item){
   wrap.appendChild(h('div',{class:'var-final-title'},
     itemHasInteractiveProgram(item) ? 'Program variables and constants' : 'Variable final state'));
   const list = h('div',{class:'var-final-list'});
+  const groups = createVarFinalGroups();
   const flights = [];
 
   bindings.forEach(b=>{
@@ -318,9 +316,7 @@ function buildAnimatedVarFinalSection(item){
     });
     row.appendChild(card);
 
-    const fullTag = bindingTagText(b, live);
-    row.appendChild(renderBindingInfoTrigger(fullTag,b.trigger==='static'));
-    list.appendChild(row);
+    varFinalGroupForBinding(groups,b).appendChild(row);
 
     if(justCommitted){
       // Mirrors connector-lines.js's own source-lookup concept: the token
@@ -359,6 +355,7 @@ function buildAnimatedVarFinalSection(item){
     }
   });
 
+  appendVarFinalGroups(list,groups);
   wrap.appendChild(list);
   return {section: wrap, flights};
 }
@@ -372,15 +369,17 @@ function mountVarFinalFloatPanel(sectionEl, flights, playEntrance){
   const title = itemHasInteractiveProgram(activeItem)
     ? 'Program variables and constants' : 'Variable final state';
 
-  const flyTitle = flyAnimEnabled
-    ? 'Turn off fly-in animation (values will appear instantly, matching the existing pulse)'
-    : 'Turn on fly-in animation for variable value updates';
+  const flyState = flyAnimEnabled ? `${flightDurationMs/1000}s` : 'Off';
+  const nextFlyState = !flyAnimEnabled ? '1 second'
+    : (flightDurationMs===1000 ? '2 seconds' : (flightDurationMs===2000 ? '3 seconds' : 'off'));
+  const flyTitle = `Memory transfer animation: ${flyState}. Activate for ${nextFlyState}.`;
   const header = h('div',{class:'var-final-float-header', onmousedown: onVarFinalFloatDragStart, ontouchstart: onVarFinalFloatDragStart},
     h('i',{class:'fa-solid fa-up-down-left-right var-final-float-drag-icon', 'aria-hidden':'true'}),
     h('span',{class:'var-final-float-title-label'}, title),
-    h('button',{class:'var-final-float-fly-toggle'+(flyAnimEnabled?' active':''), title:flyTitle, 'aria-label':flyTitle, 'aria-pressed':String(flyAnimEnabled),
-      onclick: (e)=>{ e.stopPropagation(); toggleVarFinalFlyAnim(); }
-    }, h('i',{class:'fa-solid fa-wand-magic-sparkles','aria-hidden':'true'})),
+    h('button',{class:'var-final-float-fly-toggle'+(flyAnimEnabled?' active':''), title:flyTitle, 'aria-label':flyTitle,
+      onclick: (e)=>{ e.stopPropagation(); cycleVarFinalFlyAnimation(); }
+    }, h('i',{class:'fa-solid fa-wand-magic-sparkles','aria-hidden':'true'}),
+      h('span',{class:'var-final-float-fly-state','aria-hidden':'true'},flyState)),
     h('button',{class:'var-final-float-close', title:'Hide this panel', 'aria-label':'Hide this panel',
       onclick: (e)=>{ e.stopPropagation(); toggleVarFinalFloatVisible(); }
     }, h('i',{class:'fa-solid fa-xmark','aria-hidden':'true'}))
@@ -388,7 +387,6 @@ function mountVarFinalFloatPanel(sectionEl, flights, playEntrance){
   panel.appendChild(header);
 
   const body = h('div',{class:'var-final-float-body'});
-  if(flyAnimEnabled) body.appendChild(renderVarFinalSpeedToggle());
   body.appendChild(sectionEl);
   panel.appendChild(body);
 
@@ -513,32 +511,6 @@ function clampVarFinalFloatPosition(panel){
     panel.style.left = clamped.left+'px';
     panel.style.top = clamped.top+'px';
   }
-}
-
-// Speed control for the fly-in animation, shown only while fly-in mode is
-// on (meaningless when values just appear instantly). A discrete 3-level
-// segmented toggle rather than a slider: this is a "set once and forget"
-// preference, not something dragged around often, so a full-width range
-// input was disproportionate to how often it's actually touched. Clicking
-// a level DOES need a render() (unlike the old slider's live oninput),
-// since the active segment's highlighted state lives in this same markup
-// and has to be redrawn.
-const SPEED_LEVELS = [1000, 2000, 3000];
-function renderVarFinalSpeedToggle(){
-  const label = h('span',{class:'var-final-float-speed-label'},
-    h('i',{class:'fa-solid fa-stopwatch', 'aria-hidden':'true'}), ' Fly-in speed');
-  const group = h('div',{class:'var-final-float-speed-toggle', role:'group', 'aria-label':'Fly-in animation speed'});
-  SPEED_LEVELS.forEach(ms=>{
-    const active = flightDurationMs===ms;
-    const text = `${ms/1000}s`;
-    group.appendChild(h('button',{
-      class:'var-final-float-speed-btn'+(active?' active':''),
-      'aria-pressed':String(active),
-      'aria-label':`Fly-in duration ${text}`,
-      onclick:()=>{ flightDurationMs = ms; render(); }
-    }, text));
-  });
-  return h('div',{class:'var-final-float-speed-row'}, label, group);
 }
 
 // ----------------------------------------------------------------------------
@@ -791,7 +763,7 @@ function ensureVarFinalFloatStyles(){
 }
 .var-final-float-header:active{ cursor:grabbing; }
 .var-final-float-drag-icon{ font-size:11px; opacity:0.7; }
-.var-final-float-title-label{ flex:1; }
+.var-final-float-title-label{ flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .var-final-float-close{
   background:none; border:none; color:var(--text-mute); cursor:pointer; padding:2px 5px;
   border-radius:4px; line-height:1; font-size:12px;
@@ -803,29 +775,13 @@ function ensureVarFinalFloatStyles(){
    close button next to it; only the active-state color differs, matching
    the app's existing .link-toggle.active convention. */
 .var-final-float-fly-toggle{
-  background:none; border:none; color:var(--text-mute); cursor:pointer; padding:2px 5px;
-  border-radius:4px; line-height:1; font-size:12px;
+  display:inline-flex;align-items:center;gap:4px;background:none;border:1px solid transparent;
+  color:var(--text-mute);cursor:pointer;padding:3px 5px;border-radius:5px;line-height:1;font-size:12px;
 }
 .var-final-float-fly-toggle:hover{ color:var(--text); background:var(--panel-alt); }
-.var-final-float-fly-toggle.active{ color:var(--op-glow); }
+.var-final-float-fly-toggle.active{ color:var(--op-glow);border-color:color-mix(in srgb,var(--op-glow) 45%,transparent); }
+.var-final-float-fly-state{font-family:var(--ui);font-size:9px;font-weight:800;letter-spacing:0;min-width:18px;text-align:center;}
 .var-final-float-body{ padding:12px 12px 14px; max-height:60vh; overflow:auto; }
-.var-final-float-speed-row{
-  display:flex; align-items:center; justify-content:space-between; gap:8px;
-  margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--line-soft);
-}
-.var-final-float-speed-label{
-  display:flex; align-items:center; gap:5px; white-space:nowrap;
-  font-family:var(--ui); font-size:10.5px; color:var(--text-mute);
-  text-transform:uppercase; letter-spacing:0.06em;
-}
-.var-final-float-speed-toggle{ display:flex; gap:4px; }
-.var-final-float-speed-btn{
-  background:none; border:1px solid var(--line); color:var(--text-mute); cursor:pointer;
-  padding:3px 8px; border-radius:4px; font-family:var(--ui); font-size:10.5px; font-weight:700;
-  line-height:1.4;
-}
-.var-final-float-speed-btn:hover{ color:var(--text); border-color:var(--text-dim); }
-.var-final-float-speed-btn.active{ color:var(--op-glow); border-color:var(--op-glow); }
 /* This section's own title/margins are meant for sitting inline at the
    bottom of .eval-panel — inside the float it's redundant with the
    header's own title (above) and the spacing needs to start at the body's
@@ -859,7 +815,13 @@ function ensureVarFinalFloatStyles(){
 }
 @keyframes memory-transfer-spin{ to{ transform:rotate(360deg); } }
 @media (max-width:520px){
-  .var-final-float{ width:calc(100vw - 32px); }
+  .var-final-float{ width:calc(100vw - 16px);max-width:calc(100vw - 16px);right:8px; }
+  .var-final-float-header{padding:7px 8px;gap:6px;}
+  .var-final-float-body{padding:8px;}
+  .var-final-float .var-final-list{display:flex;flex-direction:column;gap:6px;}
+  .var-final-float .var-final-group{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;}
+  .var-final-float .var-final-row{min-width:0;}
+  .var-final-float .var-final-row .tok-card{width:100%;height:48px;padding:4px 2px 5px;}
 }
 `;
   document.head.appendChild(style);
